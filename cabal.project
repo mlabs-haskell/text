@@ -1,3 +1,18 @@
 packages: .
 tests: True
 benchmarks: True
+
+allow-newer:
+  vector:base,
+  vector:ghc-prim,
+  tagged:template-haskell,
+  bytestring-lexing:bytestring,
+  splitmix:base
+
+source-repository-package
+  type: git
+  location: https://github.com/haskell/primitive
+
+source-repository-package
+  type: git
+  location: https://github.com/haskell/random
