@@ -42,25 +42,28 @@ module Data.Text.Array
 
 #if defined(ASSERTS)
 import Control.Exception (assert)
-import GHC.Base (sizeofByteArray#, sizeofMutableByteArray#)
+import GHC.Base (sizeofMutableByteArray#)
 import GHC.Stack
 #endif
 import Control.Monad.ST.Unsafe (unsafeIOToST)
 import Data.Bits ((.&.), xor)
 import Data.Text.Internal.Unsafe (inlinePerformIO)
-import Data.Text.Internal.Unsafe.Shift (shiftL, shiftR)
+import Data.Text.Internal.Unsafe.Shift (shiftR)
 import Foreign.C.Types (CInt(CInt), CSize(CSize))
 import GHC.Base (ByteArray#, MutableByteArray#, Int(..),
-                 indexWord16Array#, newByteArray#,
-                 unsafeFreezeByteArray#, writeWord16Array#)
+                 indexWord8Array#, newByteArray#,
+                 unsafeFreezeByteArray#, writeWord8Array#, sizeofByteArray#)
 import GHC.ST (ST(..), runST)
-import GHC.Word (Word16(..))
+import GHC.Word (Word8(..))
 import Prelude hiding (length, read)
 
 -- | Immutable array type.
 --
 -- The 'Array' constructor is exposed since @text-1.1.1.3@
 data Array = Array { aBA :: ByteArray# }
+
+instance Show Array where
+  show a@(Array a#) = show $ toList a 0 (I# (sizeofByteArray# a#))
 
 -- | Mutable array type, for use in the ST monad.
 --
@@ -91,7 +94,7 @@ unsafeFreeze MArray{..} = ST $ \s1# ->
 -- | Indicate how many bytes would be used for an array of the given
 -- size.
 bytesInArray :: Int -> Int
-bytesInArray n = n `shiftL` 1
+bytesInArray n = n
 {-# INLINE bytesInArray #-}
 
 -- | Unchecked read of an immutable array.  May return garbage or
@@ -100,15 +103,15 @@ unsafeIndex ::
 #if defined(ASSERTS)
   HasCallStack =>
 #endif
-  Array -> Int -> Word16
+  Array -> Int -> Word8
 unsafeIndex a@Array{..} i@(I# i#) =
 #if defined(ASSERTS)
-  let word16len = I# (sizeofByteArray# aBA) `quot` 2 in
-  if i < 0 || i >= word16len
-  then error ("Data.Text.Array.unsafeIndex: bounds error, offset " ++ show i ++ ", length " ++ show word16len)
+  let word8len = I# (sizeofByteArray# aBA) in
+  if i < 0 || i >= word8len
+  then error ("Data.Text.Array.unsafeIndex: bounds error, offset " ++ show i ++ ", length " ++ show word8len)
   else
 #endif
-  case indexWord16Array# aBA i# of r# -> (W16# r#)
+  case indexWord8Array# aBA i# of r# -> (W8# r#)
 {-# INLINE unsafeIndex #-}
 
 -- | Unchecked write of a mutable array.  May return garbage or crash
@@ -117,18 +120,18 @@ unsafeWrite ::
 #if defined(ASSERTS)
   HasCallStack =>
 #endif
-  MArray s -> Int -> Word16 -> ST s ()
-unsafeWrite ma@MArray{..} i@(I# i#) (W16# e#) = ST $ \s1# ->
+  MArray s -> Int -> Word8 -> ST s ()
+unsafeWrite ma@MArray{..} i@(I# i#) (W8# e#) = ST $ \s1# ->
 #if defined(ASSERTS)
-  let word16len = I# (sizeofMutableByteArray# maBA) `quot` 2 in
-  if i < 0 || i >= word16len then error ("Data.Text.Array.unsafeWrite: bounds error, offset " ++ show i ++ ", length " ++ show word16len) else
+  let word8len = I# (sizeofMutableByteArray# maBA) in
+  if i < 0 || i >= word8len then error ("Data.Text.Array.unsafeWrite: bounds error, offset " ++ show i ++ ", length " ++ show word8len) else
 #endif
-  case writeWord16Array# maBA i# e# s1# of
+  case writeWord8Array# maBA i# e# s1# of
     s2# -> (# s2#, () #)
 {-# INLINE unsafeWrite #-}
 
 -- | Convert an immutable array to a list.
-toList :: Array -> Int -> Int -> [Word16]
+toList :: Array -> Int -> Int -> [Word8]
 toList ary off len = loop 0
     where loop i | i < len   = unsafeIndex ary (off+i) : loop (i+1)
                  | otherwise = []
@@ -162,8 +165,8 @@ copyM dest didx src sidx count
     | count <= 0 = return ()
     | otherwise =
 #if defined(ASSERTS)
-    assert (sidx + count <= I# (sizeofMutableByteArray# (maBA src))  `quot` 2) .
-    assert (didx + count <= I# (sizeofMutableByteArray# (maBA dest)) `quot` 2) .
+    assert (sidx + count <= I# (sizeofMutableByteArray# (maBA src))) .
+    assert (didx + count <= I# (sizeofMutableByteArray# (maBA dest))) .
 #endif
     unsafeIOToST $ memcpyM (maBA dest) (intToCSize didx)
                            (maBA src) (intToCSize sidx)

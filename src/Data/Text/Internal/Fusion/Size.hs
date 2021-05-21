@@ -43,7 +43,7 @@ import Data.Text.Internal (mul)
 import Control.Exception (assert)
 #endif
 
--- | A size in UTF-16 code units.
+-- | A size in UTF-8 code units (which is bytes).
 data Size = Between {-# UNPACK #-} !Int {-# UNPACK #-} !Int -- ^ Lower and upper bounds on size.
           | Unknown                                         -- ^ Unknown size.
             deriving (Eq, Show)
@@ -54,10 +54,13 @@ exactly _ = Nothing
 {-# INLINE exactly #-}
 
 -- | The 'Size' of the given code point.
+-- TODO make branchless by looking into Word64 by clz (ord c)
 charSize :: Char -> Size
 charSize c
-  | ord c < 0x10000 = exactSize 1
-  | otherwise       = exactSize 2
+  | ord c < 0x80    = exactSize 1
+  | ord c < 0x800   = exactSize 2
+  | ord c < 0x10000 = exactSize 3
+  | otherwise       = exactSize 4
 
 -- | The 'Size' of @n@ code points.
 codePointsSize :: Int -> Size
@@ -65,7 +68,7 @@ codePointsSize n =
 #if defined(ASSERTS)
     assert (n >= 0)
 #endif
-    Between n (2*n)
+    Between n (4*n)
 {-# INLINE codePointsSize #-}
 
 exactSize :: Int -> Size
@@ -160,7 +163,7 @@ upperBound _ (Between _ n) = n
 upperBound k _             = k
 {-# INLINE upperBound #-}
 
--- | Compute the maximum size from a size hint, if possible.
+-- | Compute the minimum size from a size hint, if possible.
 lowerBound :: Int -> Size -> Int
 lowerBound _ (Between n _) = n
 lowerBound k _             = k

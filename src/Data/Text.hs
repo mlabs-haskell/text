@@ -226,11 +226,9 @@ import Data.Text.Internal.Private (span_)
 import Data.Text.Internal (Text(..), empty, firstf, mul, safe, text)
 import Data.Text.Show (singleton, unpack, unpackCString#)
 import qualified Prelude as P
-import Data.Text.Unsafe (Iter(..), iter, iter_, lengthWord16, reverseIter,
+import Data.Text.Unsafe (Iter(..), iter, iter_, lengthWord8, reverseIter,
                          reverseIter_, unsafeHead, unsafeTail)
-import Data.Text.Internal.Unsafe.Char (unsafeChr)
 import qualified Data.Text.Internal.Functions as F
-import qualified Data.Text.Internal.Encoding.Utf16 as U16
 import Data.Text.Internal.Search (indices)
 import Data.Text.Internal.Unsafe.Shift (UnsafeShift(..))
 #if defined(__HADDOCK__)
@@ -512,12 +510,9 @@ second f (a, b) = (a, f b)
 -- | /O(1)/ Returns the last character of a 'Text', which must be
 -- non-empty.  Subject to fusion.
 last :: Text -> Char
-last (Text arr off len)
-    | len <= 0                 = emptyError "last"
-    | n < 0xDC00 || n > 0xDFFF = unsafeChr n
-    | otherwise                = U16.chr2 n0 n
-    where n  = A.unsafeIndex arr (off+len-1)
-          n0 = A.unsafeIndex arr (off+len-2)
+last t@(Text _ _ len)
+    | len <= 0  = emptyError "last"
+    | otherwise = P.fst $ reverseIter t (len - 1)
 {-# INLINE [1] last #-}
 
 {-# RULES
@@ -546,11 +541,9 @@ tail t@(Text arr off len)
 -- | /O(1)/ Returns all but the last character of a 'Text', which must
 -- be non-empty.  Subject to fusion.
 init :: Text -> Text
-init (Text arr off len) | len <= 0                   = emptyError "init"
-                        | n >= 0xDC00 && n <= 0xDFFF = text arr off (len-2)
-                        | otherwise                  = text arr off (len-1)
-    where
-      n = A.unsafeIndex arr (off+len-1)
+init t@(Text arr off len)
+    | len <= 0  = emptyError "init"
+    | otherwise = text arr off (len + P.snd (reverseIter t (len - 1)))
 {-# INLINE [1] init #-}
 
 {-# RULES
@@ -565,12 +558,11 @@ init (Text arr off len) | len <= 0                   = emptyError "init"
 --
 -- @since 1.2.3.0
 unsnoc :: Text -> Maybe (Text, Char)
-unsnoc (Text arr off len)
-    | len <= 0                 = Nothing
-    | n < 0xDC00 || n > 0xDFFF = Just (text arr off (len-1), unsafeChr n)
-    | otherwise                = Just (text arr off (len-2), U16.chr2 n0 n)
-    where n  = A.unsafeIndex arr (off+len-1)
-          n0 = A.unsafeIndex arr (off+len-2)
+unsnoc t@(Text arr off len)
+    | len <= 0  = Nothing
+    | otherwise = Just (text arr off (len + d), c)
+        where
+            (c, d) = reverseIter t (len - 1)
 {-# INLINE [1] unsnoc #-}
 
 -- | /O(1)/ Tests whether a 'Text' is empty or not.  Subject to
@@ -980,7 +972,7 @@ concat ts = case ts' of
               _ -> Text (A.run go) 0 len
   where
     ts' = L.filter (not . null) ts
-    len = sumP "concat" $ L.map lengthWord16 ts'
+    len = sumP "concat" $ L.map lengthWord8 ts'
     go :: ST s (A.MArray s)
     go = do
       arr <- A.new len

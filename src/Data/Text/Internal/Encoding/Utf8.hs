@@ -34,7 +34,7 @@ module Data.Text.Internal.Encoding.Utf8
     ) where
 
 import Data.Bits ((.&.))
-import Data.Text.Internal.Unsafe.Char (ord)
+import Data.Char (ord)
 import Data.Text.Internal.Unsafe.Shift (shiftR)
 import GHC.Exts
 import GHC.Word (Word8(..))

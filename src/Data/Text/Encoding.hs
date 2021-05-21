@@ -62,30 +62,27 @@ import Control.Monad.ST.Unsafe (unsafeIOToST, unsafeSTToIO)
 
 import Control.Exception (evaluate, try, throwIO, ErrorCall(ErrorCall))
 import Control.Monad.ST (runST)
-import Data.Bits ((.&.))
 import Data.ByteString as B
-import qualified Data.ByteString.Internal as B
+import qualified Data.ByteString.Short.Internal as SBS
 import Data.Text.Encoding.Error (OnDecodeError, UnicodeException, strictDecode)
 import Data.Text.Internal (Text(..), safe, text)
 import Data.Text.Internal.Functions
 import Data.Text.Internal.Private (runText)
-import Data.Text.Internal.Unsafe.Char (ord, unsafeWrite)
-import Data.Text.Internal.Unsafe.Shift (shiftR)
+import Data.Text.Internal.Unsafe.Char (unsafeWrite)
 import Data.Text.Show ()
 import Data.Text.Unsafe (unsafeDupablePerformIO)
-import Data.Word (Word8, Word16, Word32)
-import Foreign.C.Types (CSize(CSize))
+import Data.Word (Word8, Word32)
+import Foreign.C.Types (CSize)
 import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (Ptr, minusPtr, nullPtr, plusPtr)
 import Foreign.Storable (Storable, peek, poke)
-import GHC.Base (ByteArray#, MutableByteArray#)
+import GHC.Base (MutableByteArray#)
 import qualified Data.ByteString.Builder as B
 import qualified Data.ByteString.Builder.Internal as B hiding (empty, append)
 import qualified Data.ByteString.Builder.Prim as BP
 import qualified Data.ByteString.Builder.Prim.Internal as BP
 import qualified Data.Text.Array as A
 import qualified Data.Text.Internal.Encoding.Fusion as E
-import qualified Data.Text.Internal.Encoding.Utf16 as U16
 import qualified Data.Text.Internal.Fusion as F
 import Data.Text.Internal.ByteStringCompat
 #if defined(ASSERTS)
@@ -160,6 +157,7 @@ decodeUtf8With onErr bs = withBS bs aux
                       case onErr desc (Just x) of
                         Nothing -> loop $ curPtr' `plusPtr` 1
                         Just c
+                          -- TODO check what's going on here
                           | c > '\xFFFF' -> throwUnsupportedReplChar
                           | otherwise -> do
                               destOff <- peek destOffPtr
@@ -419,24 +417,24 @@ encodeUtf8BuilderEscaped be =
               where
                 go !i !op
                   | i < iendTmp = case A.unsafeIndex arr i of
-                      w | w <= 0x7F -> do
-                            BP.runB be (word16ToWord8 w) op >>= go (i + 1)
-                        | w <= 0x7FF -> do
-                            poke8 @Word16 0 $ (w `shiftR` 6) + 0xC0
-                            poke8 @Word16 1 $ (w .&. 0x3f) + 0x80
-                            go (i + 1) (op `plusPtr` 2)
-                        | 0xD800 <= w && w <= 0xDBFF -> do
-                            let c = ord $ U16.chr2 w (A.unsafeIndex arr (i+1))
-                            poke8 @Int 0 $ (c `shiftR` 18) + 0xF0
-                            poke8 @Int 1 $ ((c `shiftR` 12) .&. 0x3F) + 0x80
-                            poke8 @Int 2 $ ((c `shiftR` 6) .&. 0x3F) + 0x80
-                            poke8 @Int 3 $ (c .&. 0x3F) + 0x80
-                            go (i + 2) (op `plusPtr` 4)
+                      -- TODO this is all wrong, use Data.Text.Internal.Encoding.Utf8.ord{2,3,4}
+                      w | w < 0x80 -> do
+                            BP.runB be w op >>= go (i + 1)
+                        | w < 0xE0 -> do
+                            poke8 @Word8 0 w
+                            poke8 @Word8 1 (A.unsafeIndex arr (i+1))
+                            go (i + 2) (op `plusPtr` 2)
+                        | w < 0xF0 -> do
+                            poke8 @Word8 0 w
+                            poke8 @Word8 1 (A.unsafeIndex arr (i+1))
+                            poke8 @Word8 2 (A.unsafeIndex arr (i+2))
+                            go (i + 3) (op `plusPtr` 3)
                         | otherwise -> do
-                            poke8 @Word16 0 $ (w `shiftR` 12) + 0xE0
-                            poke8 @Word16 1 $ ((w `shiftR` 6) .&. 0x3F) + 0x80
-                            poke8 @Word16 2 $ (w .&. 0x3F) + 0x80
-                            go (i + 1) (op `plusPtr` 3)
+                            poke8 @Word8 0 w
+                            poke8 @Word8 1 (A.unsafeIndex arr (i+1))
+                            poke8 @Word8 2 (A.unsafeIndex arr (i+2))
+                            poke8 @Word8 3 (A.unsafeIndex arr (i+3))
+                            go (i + 4) (op `plusPtr` 4)
                   | otherwise =
                       outerLoop i (B.BufferRange op ope)
                   where
@@ -446,22 +444,10 @@ encodeUtf8BuilderEscaped be =
 
 -- | Encode text using UTF-8 encoding.
 encodeUtf8 :: Text -> ByteString
-encodeUtf8 (Text arr off len)
+encodeUtf8 (Text (A.Array arr) off len)
   | len == 0  = B.empty
-  | otherwise = unsafeDupablePerformIO $ do
-  fp <- B.mallocByteString (len*3) -- see https://github.com/haskell/text/issues/194 for why len*3 is enough
-  unsafeWithForeignPtr fp $ \ptr ->
-    with ptr $ \destPtr -> do
-      c_encode_utf8 destPtr (A.aBA arr) (intToCSize off) (intToCSize len)
-      newDest <- peek destPtr
-      let utf8len = newDest `minusPtr` ptr
-      if utf8len >= len `shiftR` 1
-        then return (mkBS fp utf8len)
-        else do
-          fp' <- B.mallocByteString utf8len
-          unsafeWithForeignPtr fp' $ \ptr' -> do
-            B.memcpy ptr' ptr utf8len
-            return (mkBS fp' utf8len)
+  -- TODO review this conversion
+  | otherwise = B.take len $ B.drop off $ SBS.fromShort $ SBS.SBS arr
 
 -- | Decode text from little endian UTF-16 encoding.
 decodeUtf16LEWith :: OnDecodeError -> ByteString -> Text
@@ -545,9 +531,6 @@ cSizeToInt = fromIntegral
 intToCSize :: Int -> CSize
 intToCSize = fromIntegral
 
-word16ToWord8 :: Word16 -> Word8
-word16ToWord8 = fromIntegral
-
 foreign import ccall unsafe "_hs_text_decode_utf8" c_decode_utf8
     :: MutableByteArray# s -> Ptr CSize
     -> Ptr Word8 -> Ptr Word8 -> IO (Ptr Word8)
@@ -559,6 +542,3 @@ foreign import ccall unsafe "_hs_text_decode_utf8_state" c_decode_utf8_with_stat
 
 foreign import ccall unsafe "_hs_text_decode_latin1" c_decode_latin1
     :: MutableByteArray# s -> Ptr Word8 -> Ptr Word8 -> IO ()
-
-foreign import ccall unsafe "_hs_text_encode_utf8" c_encode_utf8
-    :: Ptr (Ptr Word8) -> ByteArray# -> CSize -> CSize -> IO ()

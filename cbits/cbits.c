@@ -19,13 +19,13 @@
 void _hs_text_memcpy(void *dest, size_t doff, const void *src, size_t soff,
 		     size_t n)
 {
-  memcpy(dest + (doff<<1), src + (soff<<1), n<<1);
+  memcpy(dest + doff, src + soff, n);
 }
 
 int _hs_text_memcmp(const void *a, size_t aoff, const void *b, size_t boff,
 		    size_t n)
 {
-  return memcmp(a + (aoff<<1), b + (boff<<1), n<<1);
+  return memcmp(a + aoff, b + boff, n);
 }
 
 #define UTF8_ACCEPT 0
@@ -73,7 +73,7 @@ decode(uint32_t *state, uint32_t* codep, uint32_t byte) {
  * an UTF16 array
  */
 void
-_hs_text_decode_latin1(uint16_t *dest, const uint8_t *src,
+_hs_text_decode_latin1(uint8_t *dest, const uint8_t *src,
                        const uint8_t *srcend)
 {
   const uint8_t *p = src;
@@ -152,18 +152,18 @@ _hs_text_decode_latin1(uint16_t *dest, const uint8_t *src,
  */
 #if defined(__GNUC__) || defined(__clang__)
 static inline uint8_t const *
-_hs_text_decode_utf8_int(uint16_t *const dest, size_t *destoff,
+_hs_text_decode_utf8_int(uint8_t *const dest, size_t *destoff,
 			 const uint8_t **src, const uint8_t *srcend,
 			 uint32_t *codepoint0, uint32_t *state0)
   __attribute((always_inline));
 #endif
 
 static inline uint8_t const *
-_hs_text_decode_utf8_int(uint16_t *const dest, size_t *destoff,
+_hs_text_decode_utf8_int(uint8_t *const dest, size_t *destoff,
 			 const uint8_t **src, const uint8_t *srcend,
 			 uint32_t *codepoint0, uint32_t *state0)
 {
-  uint16_t *d = dest + *destoff;
+  uint8_t *d = dest + *destoff;
   const uint8_t *s = *src, *last = *src;
   uint32_t state = *state0;
   uint32_t codepoint = *codepoint0;
@@ -180,23 +180,6 @@ _hs_text_decode_utf8_int(uint16_t *const dest, size_t *destoff,
      */
 
     if (state == UTF8_ACCEPT) {
-#if defined(__x86_64__)
-      const __m128i zeros = _mm_set1_epi32(0);
-      while (s < srcend - 8) {
-        const uint64_t hopefully_eight_ascii_chars = *((uint64_t *) s);
-        if ((hopefully_eight_ascii_chars & 0x8080808080808080LL) != 0LL)
-          break;
-        s += 8;
-
-        /* Load 8 bytes of ASCII data */
-        const __m128i eight_ascii_chars = _mm_cvtsi64_si128(hopefully_eight_ascii_chars);
-        /* Interleave with zeros */
-        const __m128i eight_utf16_chars = _mm_unpacklo_epi8(eight_ascii_chars, zeros);
-        /* Store the resulting 16 bytes into destination */
-        _mm_storeu_si128((__m128i *)d, eight_utf16_chars);
-        d += 8;
-      }
-#else  
       while (s < srcend - 4) {
         codepoint = *((uint32_t *) s);
         if ((codepoint & 0x80808080) != 0)
@@ -205,13 +188,13 @@ _hs_text_decode_utf8_int(uint16_t *const dest, size_t *destoff,
         /*
          * Tried 32-bit stores here, but the extra bit-twiddling
          * slowed the code down.
+         * TODO Now we can just copy, no need for bit-twiddling
          */
-        *d++ = (uint16_t) (codepoint & 0xff);
-        *d++ = (uint16_t) ((codepoint >> 8) & 0xff);
-        *d++ = (uint16_t) ((codepoint >> 16) & 0xff);
-        *d++ = (uint16_t) ((codepoint >> 24) & 0xff);
+        *d++ = (uint8_t) (codepoint & 0xff);
+        *d++ = (uint8_t) ((codepoint >> 8) & 0xff);
+        *d++ = (uint8_t) ((codepoint >> 16) & 0xff);
+        *d++ = (uint8_t) ((codepoint >> 24) & 0xff);
       }
-#endif
       last = s;
     } /* end if (state == UTF8_ACCEPT) */
 #endif
@@ -222,6 +205,7 @@ _hs_text_decode_utf8_int(uint16_t *const dest, size_t *destoff,
       break;
     }
 
+    /* TODO this is broken for now */
     if (codepoint <= 0xffff)
       *d++ = (uint16_t) codepoint;
     else {
@@ -240,7 +224,7 @@ _hs_text_decode_utf8_int(uint16_t *const dest, size_t *destoff,
 }
 
 uint8_t const *
-_hs_text_decode_utf8_state(uint16_t *const dest, size_t *destoff,
+_hs_text_decode_utf8_state(uint8_t *const dest, size_t *destoff,
                            const uint8_t **src,
                            const uint8_t *srcend,
                            uint32_t *codepoint0, uint32_t *state0)
@@ -254,7 +238,7 @@ _hs_text_decode_utf8_state(uint16_t *const dest, size_t *destoff,
  * Helper to decode buffer and discard final decoder state
  */
 const uint8_t *
-_hs_text_decode_utf8(uint16_t *const dest, size_t *destoff,
+_hs_text_decode_utf8(uint8_t *const dest, size_t *destoff,
                      const uint8_t *src, const uint8_t *const srcend)
 {
   uint32_t codepoint;
@@ -262,91 +246,4 @@ _hs_text_decode_utf8(uint16_t *const dest, size_t *destoff,
   _hs_text_decode_utf8_int(dest, destoff, &src, srcend,
                           &codepoint, &state);
   return src;
-}
-
-void
-_hs_text_encode_utf8(uint8_t **destp, const uint16_t *src, size_t srcoff,
-		     size_t srclen)
-{
-  const uint16_t *srcend;
-  uint8_t *dest = *destp;
-
-  src += srcoff;
-  srcend = src + srclen;
-
- ascii:
-#if defined(__x86_64__)
-  while (srcend - src >= 8) {
-    union { uint64_t halves[2]; __m128i whole; } eight_chars;
-    eight_chars.whole = _mm_loadu_si128((__m128i *) src);
-
-    const uint64_t w = eight_chars.halves[0];
-    if (w & 0xFF80FF80FF80FF80ULL) {
-      if (!(w & 0x000000000000FF80ULL)) {
-        *dest++ = w & 0xFFFF;
-        src++;
-        if (!(w & 0x00000000FF800000ULL)) {
-          *dest++ = (w >> 16) & 0xFFFF;
-          src++;
-          if (!(w & 0x0000FF8000000000ULL)) {
-            *dest++ = (w >> 32) & 0xFFFF;
-            src++;
-          }
-        }
-      }
-      break;
-    }
-
-    if (eight_chars.halves[1] & 0xFF80FF80FF80FF80ULL) {
-      break;
-    }
-
-    const __m128i eight_ascii_chars = _mm_packus_epi16(eight_chars.whole, eight_chars.whole);
-    _mm_storel_epi64((__m128i *)dest, eight_ascii_chars);
-
-    dest += 8;
-    src += 8;
-  }
-#endif
-
-#if defined(__i386__)
-  while (srcend - src >= 2) {
-    uint32_t w = *((uint32_t *) src);
-
-    if (w & 0xFF80FF80)
-      break;
-    *dest++ = w & 0xFFFF;
-    *dest++ = w >> 16;
-    src += 2;
-  }
-#endif
-
-  while (src < srcend) {
-    uint16_t w = *src++;
-
-    if (w <= 0x7F) {
-      *dest++ = w;
-      /* An ASCII byte is likely to begin a run of ASCII bytes.
-	 Falling back into the fast path really helps performance. */
-      goto ascii;
-    }
-    else if (w <= 0x7FF) {
-      *dest++ = (w >> 6) | 0xC0;
-      *dest++ = (w & 0x3f) | 0x80;
-    }
-    else if (w < 0xD800 || w > 0xDBFF) {
-      *dest++ = (w >> 12) | 0xE0;
-      *dest++ = ((w >> 6) & 0x3F) | 0x80;
-      *dest++ = (w & 0x3F) | 0x80;
-    } else {
-      uint32_t c = ((((uint32_t) w) - 0xD800) << 10) +
-	(((uint32_t) *src++) - 0xDC00) + 0x10000;
-      *dest++ = (c >> 18) | 0xF0;
-      *dest++ = ((c >> 12) & 0x3F) | 0x80;
-      *dest++ = ((c >> 6) & 0x3F) | 0x80;
-      *dest++ = (c & 0x3F) | 0x80;
-    }
-  }
-
-  *destp = dest;
 }
