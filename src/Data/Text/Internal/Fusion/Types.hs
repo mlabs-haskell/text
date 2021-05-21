@@ -49,6 +49,7 @@ infixl 2 :*:
 -- | An intermediate result in a scan.
 data Scan s = Scan1 {-# UNPACK #-} !Char !s
             | Scan2 {-# UNPACK #-} !Char !s
+            -- TODO, should there be Scan3 and Scan4?
 
 -- | Intermediate result in a processing pipeline.
 data Step s a = Done

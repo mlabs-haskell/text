@@ -50,19 +50,18 @@ module Data.Text.Internal.Fusion
     ) where
 
 import Prelude (Bool(..), Char, Maybe(..), Monad(..), Int,
-                Num(..), Ord(..), ($), (&&),
-                fromIntegral, otherwise)
-import Data.Bits ((.&.), shiftL, shiftR)
+                Num(..), Ord(..), ($),
+                otherwise)
+import Data.Bits (shiftL, shiftR)
 import Data.Text.Internal (Text(..))
 import Data.Text.Internal.Private (runText)
-import Data.Text.Internal.Unsafe.Char (ord, unsafeChr, unsafeWrite)
+import Data.Text.Internal.Unsafe.Char (unsafeChr8, unsafeWrite)
 import qualified Data.Text.Array as A
 import qualified Data.Text.Internal.Fusion.Common as S
 import Data.Text.Internal.Fusion.Types
 import Data.Text.Internal.Fusion.Size
 import qualified Data.Text.Internal as I
-import qualified Data.Text.Internal.Encoding.Utf16 as U16
-import Data.Word (Word16)
+import qualified Data.Text.Internal.Encoding.Utf8 as U8
 
 #if defined(ASSERTS)
 import GHC.Stack (HasCallStack)
@@ -76,41 +75,53 @@ stream ::
   HasCallStack =>
 #endif
   Text -> Stream Char
-stream (Text arr off len) = Stream next off (betweenSize (len `shiftR` 1) len)
+stream (Text arr off len) = Stream next off (betweenSize (len `shiftR` 2) len)
     where
       !end = off+len
       next !i
-          | i >= end                   = Done
-          | n >= 0xD800 && n <= 0xDBFF = Yield (U16.chr2 n n2) (i + 2)
-          | otherwise                  = Yield (unsafeChr n) (i + 1)
+          | i >= end  = Done
+          | otherwise = Yield chr (i + l)
           where
-            n  = A.unsafeIndex arr i
-            n2 = A.unsafeIndex arr (i + 1)
+            n0 = A.unsafeIndex arr i
+            n1 = A.unsafeIndex arr (i + 1)
+            n2 = A.unsafeIndex arr (i + 2)
+            n3 = A.unsafeIndex arr (i + 3)
+
+            l  = U8.utf8LengthByLeader n0
+            chr = case l of
+              1 -> unsafeChr8 n0
+              2 -> U8.chr2 n0 n1
+              3 -> U8.chr3 n0 n1 n2
+              _ -> U8.chr4 n0 n1 n2 n3
 {-# INLINE [0] stream #-}
 
 -- | /O(n)/ Convert a 'Text' into a 'Stream Char', but iterate
 -- backwards.
 reverseStream :: Text -> Stream Char
-reverseStream (Text arr off len) = Stream next (off+len-1) (betweenSize (len `shiftR` 1) len)
+reverseStream (Text arr off len) = Stream next (off+len-1) (betweenSize (len `shiftR` 2) len)
     where
       {-# INLINE next #-}
       next !i
-          | i < off                    = Done
-          | n >= 0xDC00 && n <= 0xDFFF = Yield (U16.chr2 n2 n) (i - 2)
-          | otherwise                  = Yield (unsafeChr n) (i - 1)
+          | i < off    = Done
+          | n0 <  0x80 = Yield (unsafeChr8 n0)       (i - 1)
+          | n1 >= 0xC0 = Yield (U8.chr2 n1 n0)       (i - 2)
+          | n2 >= 0xC0 = Yield (U8.chr3 n2 n1 n0)    (i - 3)
+          | otherwise  = Yield (U8.chr4 n3 n2 n1 n0) (i - 4)
           where
-            n  = A.unsafeIndex arr i
-            n2 = A.unsafeIndex arr (i - 1)
+            n0 = A.unsafeIndex arr i
+            n1 = A.unsafeIndex arr (i - 1)
+            n2 = A.unsafeIndex arr (i - 2)
+            n3 = A.unsafeIndex arr (i - 3)
 {-# INLINE [0] reverseStream #-}
 
 -- | /O(n)/ Convert a 'Stream Char' into a 'Text'.
 unstream :: Stream Char -> Text
 unstream (Stream next0 s0 len) = runText $ \done -> do
   -- Before encoding each char we perform a buffer realloc check assuming
-  -- worst case encoding size of two 16-bit units for the char. Just add an
+  -- worst case encoding size of four 8-bit units for the char. Just add an
   -- extra space to the buffer so that we do not end up reallocating even when
   -- all the chars are encoded as single unit.
-  let mlen = upperBound 4 len + 1
+  let mlen = upperBound 4 len + 3
   arr0 <- A.new mlen
   let outer !arr !maxi = encode
        where
@@ -121,7 +132,7 @@ unstream (Stream next0 s0 len) = runText $ \done -> do
                 Skip si'    -> encode si' di
                 Yield c si'
                     -- simply check for the worst case
-                    | maxi < di + 1 -> realloc si di
+                    | maxi < di + 3 -> realloc si di
                     | otherwise -> do
                             n <- unsafeWrite arr di c
                             encode si' (di + n)
@@ -146,7 +157,7 @@ length :: Stream Char -> Int
 length = S.lengthI
 {-# INLINE[0] length #-}
 
--- | /O(n)/ Reverse the characters of a string.
+-- | /O(n)/ Reverse the characters of a string. TODO
 reverse ::
 #if defined(ASSERTS)
   HasCallStack =>
@@ -167,26 +178,16 @@ reverse (Stream next s len0)
                        let newLen = len `shiftL` 1
                        marr' <- A.new newLen
                        A.copyM marr' (newLen-len) marr 0 len
-                       write s1 (len+i) newLen marr'
-                     | otherwise -> write s1 i len marr
-            where n = ord x
-                  least | n < 0x10000 = 0
-                        | otherwise   = 1
-                  m = n - 0x10000
-                  lo = intToWord16 $ (m `shiftR` 10) + 0xD800
-                  hi = intToWord16 $ (m .&. 0x3FF) + 0xDC00
-                  write t j l mar
-                      | n < 0x10000 = do
-                          A.unsafeWrite mar j (intToWord16 n)
-                          loop t (j-1) l mar
-                      | otherwise = do
-                          A.unsafeWrite mar (j-1) lo
-                          A.unsafeWrite mar j hi
-                          loop t (j-2) l mar
+                       _ <- unsafeWrite marr' (len + i - least) x
+                       loop s1 (len + i - least - 1) newLen marr'
+                     | otherwise -> do
+                       _ <- unsafeWrite marr (i - least) x
+                       loop s1 (i - least - 1) len marr
+            where least = U8.utf8Length x - 1
 {-# INLINE [0] reverse #-}
 
 -- | /O(n)/ Perform the equivalent of 'scanr' over a list, only with
--- the input and result reversed.
+-- the input and result reversed. TODO
 reverseScanr :: (Char -> Char -> Char) -> Char -> Stream Char -> Stream Char
 reverseScanr f z0 (Stream next0 s0 len) = Stream next (Scan1 z0 s0) (len+1) -- HINT maybe too low
   where
@@ -230,7 +231,7 @@ countChar = S.countCharI
 
 -- | /O(n)/ Like a combination of 'map' and 'foldl''. Applies a
 -- function to each element of a 'Text', passing an accumulating
--- parameter from left to right, and returns a final 'Text'.
+-- parameter from left to right, and returns a final 'Text'. TODO
 mapAccumL ::
 #if defined(ASSERTS)
   HasCallStack =>
@@ -255,9 +256,5 @@ mapAccumL f z0 (Stream next0 s0 len) = (nz, I.text na 0 nl)
                 | otherwise -> do d <- unsafeWrite arr i c
                                   loop z' s' (i+d)
                 where (z',c) = f z x
-                      j | ord c < 0x10000 = i
-                        | otherwise       = i + 1
+                      j = i + U8.utf8Length c - 1
 {-# INLINE [0] mapAccumL #-}
-
-intToWord16 :: Int -> Word16
-intToWord16 = fromIntegral

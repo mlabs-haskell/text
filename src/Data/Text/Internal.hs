@@ -71,7 +71,7 @@ text_ arr off len =
   let c    = A.unsafeIndex arr off
   in assert (len >= 0) .
      assert (off >= 0) .
-     assert (len == 0 || c < 0xDC00 || c > 0xDFFF) $
+     assert (len == 0 || c < 0x80 || c >= 0xC0) $
 #endif
      Text arr off len
 {-# INLINE text_ #-}
