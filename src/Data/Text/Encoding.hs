@@ -122,6 +122,7 @@ decodeLatin1 ::
 decodeLatin1 bs = withBS bs aux where
   aux fp len = text a 0 len
    where
+    -- TODO this is broken now: need to allocate 2*len
     a = A.run (A.new len >>= unsafeIOToST . go)
     go dest = unsafeWithForeignPtr fp $ \ptr -> do
       c_decode_latin1 (A.maBA dest) ptr (ptr `plusPtr` len)
@@ -157,7 +158,10 @@ decodeUtf8With onErr bs = withBS bs aux
                       case onErr desc (Just x) of
                         Nothing -> loop $ curPtr' `plusPtr` 1
                         Just c
-                          -- TODO check what's going on here
+                          -- TODO This is problematic, because replacement characters
+                          -- can be longer than one UTF8 code unit (which is byte),
+                          -- but we have allocated exactly len bytes.
+                          -- See TODO below for more context.
                           | c > '\xFFFF' -> throwUnsupportedReplChar
                           | otherwise -> do
                               destOff <- peek destOffPtr

@@ -106,15 +106,17 @@ import Prelude (Bool(..), Char, Eq(..), Int, Integral, Maybe(..),
                 (&&), fromIntegral, otherwise)
 import qualified Data.List as L
 import qualified Prelude as P
-import Data.Bits (shiftL)
 import Data.Char (isLetter, isSpace)
 import Data.Int (Int64)
+import Data.Text.Internal.Encoding.Utf8 (chr2, chr3, chr4)
 import Data.Text.Internal.Fusion.Types
 import Data.Text.Internal.Fusion.CaseMapping (foldMapping, lowerMapping, titleMapping,
                                      upperMapping)
 import Data.Text.Internal.Fusion.Size
-import GHC.Prim (Addr#, chr#, indexCharOffAddr#, ord#)
-import GHC.Types (Char(..), Int(..))
+import GHC.Prim (Addr#, indexWord8OffAddr#)
+import GHC.Types (Int(..))
+import Data.Text.Internal.Unsafe.Char (unsafeChr8)
+import GHC.Word
 
 singleton :: Char -> Stream Char
 singleton c = Stream next False (codePointsSize 1)
@@ -148,23 +150,16 @@ streamCString# addr = Stream step 0 unknownSize
   where
     step !i
         | b == 0    = Done
-        | b <= 0x7f = Yield (C# b#) (i+1)
-        | b <= 0xdf = let !c = chr $ ((b-0xc0) `shiftL` 6) + next 1
+        | b < 0x80  = Yield (unsafeChr8 b) (i+1)
+        | b < 0xE0  = let !c = chr2 b (next 1)
                       in Yield c (i+2)
-        | b <= 0xef = let !c = chr $ ((b-0xe0) `shiftL` 12) +
-                                      (next 1  `shiftL` 6) +
-                                       next 2
+        | b < 0xF0  = let !c = chr3 b (next 1) (next 2)
                       in Yield c (i+3)
-        | otherwise = let !c = chr $ ((b-0xf0) `shiftL` 18) +
-                                      (next 1  `shiftL` 12) +
-                                      (next 2  `shiftL` 6) +
-                                       next 3
+        | otherwise = let !c = chr4 b (next 1) (next 2) (next 3)
                       in Yield c (i+4)
-      where b      = I# (ord# b#)
-            next n = I# (ord# (at# (i+n))) - 0x80
-            !b#    = at# i
-    at# (I# i#) = indexCharOffAddr# addr i#
-    chr (I# i#) = C# (chr# i#)
+      where b      = at# i
+            next n = at# (i+n)
+    at# (I# i#) = W8# (indexWord8OffAddr# addr i#)
 {-# INLINE [0] streamCString# #-}
 
 -- ----------------------------------------------------------------------------

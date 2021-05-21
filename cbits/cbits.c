@@ -76,51 +76,18 @@ void
 _hs_text_decode_latin1(uint8_t *dest, const uint8_t *src,
                        const uint8_t *srcend)
 {
+  const uint8_t *dest0 = dest;
   const uint8_t *p = src;
 
-#if defined(__i386__) || defined(__x86_64__)
-  /* This optimization works on a little-endian systems by using
-     (aligned) 32-bit loads instead of 8-bit loads
-   */
-
-  /* consume unaligned prefix */
-  while (p != srcend && (uintptr_t)p & 0x3)
-    *dest++ = *p++;
-
-#if defined(__x86_64__)
-  /* All the intrinsics used here are from SSE2,
-   * so every x86_64 CPU supports them.
-   */
-  const __m128i zeros = _mm_set1_epi32(0);
-  while (p < srcend - 7) {
-    /* Load 8 bytes of ASCII data */
-    const __m128i ascii = _mm_cvtsi64_si128(*((const uint64_t *)p));
-    /* Interleave with zeros */
-    const __m128i utf16 = _mm_unpacklo_epi8(ascii, zeros);
-    /* Store the resulting 16 bytes into destination */
-    _mm_storeu_si128((__m128i *)dest, utf16);
-
-    dest += 8;
-    p += 8;
+  while (p != srcend){
+    uint8_t codepoint = *p++;
+    if(codepoint < 0x80){
+      *dest++ = codepoint;
+    } else {
+      *dest++ = 0xC0 + (codepoint >> 6);
+      *dest++ = 0x80 + (codepoint & 0x40);
+    }
   }
-#else
-  /* iterate over 32-bit aligned loads */
-  while (p < srcend - 3) {
-    const uint32_t w = *((const uint32_t *)p);
-
-    *dest++ =  w        & 0xff;
-    *dest++ = (w >> 8)  & 0xff;
-    *dest++ = (w >> 16) & 0xff;
-    *dest++ = (w >> 24) & 0xff;
-
-    p += 4;
-  }
-#endif
-#endif
-
-  /* handle unaligned suffix */
-  while (p != srcend)
-    *dest++ = *p++;
 }
 
 /*

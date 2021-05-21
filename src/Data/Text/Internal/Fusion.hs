@@ -51,8 +51,7 @@ module Data.Text.Internal.Fusion
 
 import Prelude (Bool(..), Char, Maybe(..), Monad(..), Int,
                 Num(..), Ord(..), ($),
-                fromIntegral, otherwise)
-import Data.Bits ((.&.))
+                otherwise)
 import Data.Text.Internal (Text(..))
 import Data.Text.Internal.Private (runText)
 import Data.Text.Internal.Unsafe.Char (ord, unsafeChr8, unsafeWrite)
@@ -63,7 +62,6 @@ import Data.Text.Internal.Fusion.Types
 import Data.Text.Internal.Fusion.Size
 import qualified Data.Text.Internal as I
 import qualified Data.Text.Internal.Encoding.Utf8 as U8
-import Data.Word (Word8)
 
 #if defined(ASSERTS)
 import GHC.Stack
@@ -87,7 +85,7 @@ stream (Text arr off len) = Stream next off (betweenSize (len `shiftR` 2) len)
           | n0 < 0xF0 = Yield (U8.chr3 n0 n1 n2)    (i + 3)
           | otherwise = Yield (U8.chr4 n0 n1 n2 n3) (i + 4)
           where
-            n0  = A.unsafeIndex arr i
+            n0 = A.unsafeIndex arr i
             n1 = A.unsafeIndex arr (i + 1)
             n2 = A.unsafeIndex arr (i + 2)
             n3 = A.unsafeIndex arr (i + 3)
@@ -176,22 +174,15 @@ reverse (Stream next s len0)
                        let newLen = len `shiftL` 1
                        marr' <- A.new newLen
                        A.copyM marr' (newLen-len) marr 0 len
-                       write s1 (len+i) newLen marr'
-                     | otherwise -> write s1 i len marr
-            where n = ord x
-                  least | n < 0x10000 = 0
-                        | otherwise   = 1
-                  m = n - 0x10000
-                  lo = intToWord8 $ (m `shiftR` 10) + 0xD800
-                  hi = intToWord8 $ (m .&. 0x3FF) + 0xDC00
-                  write t j l mar
-                      | n < 0x10000 = do
-                          A.unsafeWrite mar j (intToWord8 n)
-                          loop t (j-1) l mar
-                      | otherwise = do
-                          A.unsafeWrite mar (j-1) lo
-                          A.unsafeWrite mar j hi
-                          loop t (j-2) l mar
+                       _ <- unsafeWrite marr' (len + i - least) x
+                       loop s1 (len + i - least - 1) newLen marr'
+                     | otherwise -> do
+                       _ <- unsafeWrite marr (i - least) x
+                       loop s1 (i - least - 1) len marr
+            where least | ord x < 0x80    = 0
+                        | ord x < 0x800   = 1
+                        | ord x < 0x10000 = 2
+                        | otherwise       = 3
 {-# INLINE [0] reverse #-}
 
 -- | /O(n)/ Perform the equivalent of 'scanr' over a list, only with
@@ -264,9 +255,8 @@ mapAccumL f z0 (Stream next0 s0 len) = (nz, I.text na 0 nl)
                 | otherwise -> do d <- unsafeWrite arr i c
                                   loop z' s' (i+d)
                 where (z',c) = f z x
-                      j | ord c < 0x10000 = i
-                        | otherwise       = i + 1
+                      j | ord c < 0x80    = i
+                        | ord c < 0x800   = i + 1
+                        | ord c < 0x10000 = i + 2
+                        | otherwise       = i + 3
 {-# INLINE [0] mapAccumL #-}
-
-intToWord8 :: Int -> Word8
-intToWord8 = fromIntegral
