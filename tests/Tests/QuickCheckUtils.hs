@@ -35,7 +35,7 @@ module Tests.QuickCheckUtils
 import Control.Arrow (first, (***))
 import Control.DeepSeq (NFData (..), deepseq)
 import Control.Exception (bracket)
-import Data.Text.Foreign (I16)
+import Data.Text.Foreign (I8)
 import Data.Text.Lazy.Builder.RealFloat (FPFormat(..))
 import Data.Word (Word8, Word16)
 import Debug.Trace (trace)
@@ -57,11 +57,11 @@ import qualified System.IO as IO
 genWord8 :: Gen Word8
 genWord8 = chooseAny
 
-instance Random I16 where
+instance Random I8 where
     randomR = integralRandomR
     random  = randomR (minBound,maxBound)
 
-instance Arbitrary I16 where
+instance Arbitrary I8 where
     arbitrary     = arbitrarySizedIntegral
     shrink        = shrinkIntegral
 

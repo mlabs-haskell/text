@@ -140,7 +140,7 @@ singleton ::
   HasCallStack =>
 #endif
   Char -> Builder
-singleton c = writeAtMost 2 $ \ marr o -> unsafeWrite marr o (safe c)
+singleton c = writeAtMost 4 $ \ marr o -> unsafeWrite marr o (safe c)
 {-# INLINE singleton #-}
 
 ------------------------------------------------------------------------

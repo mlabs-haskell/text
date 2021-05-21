@@ -10,7 +10,7 @@ import Control.Exception as E (SomeException, catch, evaluate)
 import Data.Int (Int32, Int64)
 import Data.Text.Foreign
 import Data.Text.Internal (mul, mul32, mul64)
-import Data.Word (Word16, Word32)
+import Data.Word (Word8, Word16, Word32)
 import System.IO.Unsafe (unsafePerformIO)
 import Test.QuickCheck.Monadic
 import Test.Tasty (TestTree, testGroup)
@@ -47,9 +47,9 @@ t_mul a b = mulRef a b === eval mul a b
 
 -- Misc.
 
-t_dropWord16 m t = dropWord16 m t `T.isSuffixOf` t
-t_takeWord16 m t = takeWord16 m t `T.isPrefixOf` t
-t_take_drop_16 m t = T.append (takeWord16 n t) (dropWord16 n t) === t
+t_dropWord8 m t = dropWord8 m t `T.isSuffixOf` t
+t_takeWord8 m t = takeWord8 m t `T.isPrefixOf` t
+t_take_drop_8 m t = T.append (takeWord8 n t) (dropWord8 n t) === t
   where n = small m
 t_use_from t = monadicIO $ assert . (==t) =<< run (useAsPtr t fromPtr)
 
@@ -82,9 +82,9 @@ testLowLevel =
     ],
 
     testGroup "misc" [
-      testProperty "t_dropWord16" t_dropWord16,
-      testProperty "t_takeWord16" t_takeWord16,
-      testProperty "t_take_drop_16" t_take_drop_16,
+      testProperty "t_dropWord8" t_dropWord8,
+      testProperty "t_takeWord8" t_takeWord8,
+      testProperty "t_take_drop_8" t_take_drop_8,
       testProperty "t_use_from" t_use_from,
       testProperty "t_copy" t_copy
     ],
