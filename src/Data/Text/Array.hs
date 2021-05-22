@@ -37,6 +37,8 @@ module Data.Text.Array
     , toList
     , unsafeFreeze
     , unsafeIndex
+    , unsafeIndex16
+    , unsafeIndex32
     , new
     , unsafeWrite
     , unsafeWrite16
@@ -56,7 +58,7 @@ import Data.Text.Internal.Unsafe.Shift (shiftR)
 import Foreign.C.Types (CInt(CInt), CSize(CSize))
 import GHC.Base (ByteArray#, MutableByteArray#, Int(..),
                  indexWord8Array#, newByteArray#,
-                 unsafeFreezeByteArray#, writeWord8Array#, sizeofByteArray#, writeWord8ArrayAsWord16#, writeWord8ArrayAsWord32#, resizeMutableByteArray#)
+                 unsafeFreezeByteArray#, writeWord8Array#, sizeofByteArray#, writeWord8ArrayAsWord16#, writeWord8ArrayAsWord32#, resizeMutableByteArray#, indexWord8ArrayAsWord16#, indexWord8ArrayAsWord32#)
 import GHC.ST (ST(..), runST)
 import GHC.Word (Word8(..), Word16(..), Word32(..))
 import Prelude hiding (length, read)
@@ -117,6 +119,36 @@ unsafeIndex a@Array{..} i@(I# i#) =
 #endif
   case indexWord8Array# aBA i# of r# -> (W8# r#)
 {-# INLINE unsafeIndex #-}
+
+unsafeIndex16 ::
+#if defined(ASSERTS)
+  HasCallStack =>
+#endif
+  Array -> Int -> Word16
+unsafeIndex16 a@Array{..} i@(I# i#) =
+#if defined(ASSERTS)
+  let word8len = I# (sizeofByteArray# aBA) in
+  if i < 0 || i >= word8len - 1
+  then error ("Data.Text.Array.unsafeIndex16: bounds error, offset " ++ show i ++ ", length " ++ show word8len)
+  else
+#endif
+  case indexWord8ArrayAsWord16# aBA i# of r# -> (W16# r#)
+{-# INLINE unsafeIndex16 #-}
+
+unsafeIndex32 ::
+#if defined(ASSERTS)
+  HasCallStack =>
+#endif
+  Array -> Int -> Word32
+unsafeIndex32 a@Array{..} i@(I# i#) =
+#if defined(ASSERTS)
+  let word8len = I# (sizeofByteArray# aBA) in
+  if i < 0 || i >= word8len - 3
+  then error ("Data.Text.Array.unsafeIndex32: bounds error, offset " ++ show i ++ ", length " ++ show word8len)
+  else
+#endif
+  case indexWord8ArrayAsWord32# aBA i# of r# -> (W32# r#)
+{-# INLINE unsafeIndex32 #-}
 
 -- | Unchecked write of a mutable array.  May return garbage or crash
 -- on an out-of-bounds access.
