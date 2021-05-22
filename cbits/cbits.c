@@ -81,6 +81,48 @@ _hs_text_decode_latin1(uint8_t *dest, const uint8_t *src,
   return (dest - dest0);
 }
 
+size_t _hs_text_iterN(const uint8_t *src0, size_t srcoff, size_t srclen, size_t cnt)
+{
+  const uint8_t *src = src0 + srcoff;
+  const uint8_t *srcend = src + srclen;
+
+#if defined(__x86_64__)
+  while (src < srcend - 15){
+    __m128i w128 = _mm_loadu_si128((__m128i *)src);
+    w128 = _mm_or_si128(_mm_slli_epi64(w128, 1), _mm_xor_si128(w128, _mm_set1_epi8(0xFFU)));
+    uint16_t mask = _mm_movemask_epi8(w128);
+    size_t leads = __builtin_popcount(mask);
+
+    if (cnt < leads) break;
+    src+= 16;
+    cnt-= leads;
+  }
+#endif
+
+  while (src < srcend - 7){
+    uint64_t w64;
+    memcpy(&w64, src, sizeof(uint64_t));
+    size_t leads = __builtin_popcountll(((w64 << 1) | ~w64) & 0x8080808080808080ULL);
+    if (cnt < leads) break;
+    src+= 8;
+    cnt-= leads;
+  }
+
+  while (src < srcend){
+    uint8_t w8 = *src;
+    if ((int8_t)w8 >= -0x40) break;
+    src++;
+  }
+
+  while (src < srcend && cnt > 0){
+    uint8_t leadByte = *src++;
+    src+= (leadByte >= 0xc0) + (leadByte >= 0xe0) + (leadByte >= 0xf0);
+    cnt--;
+  }
+
+  return (src - src0 - srcoff);
+}
+
 /*
  * A best-effort decoder. Runs until it hits either end of input or
  * the start of an invalid byte sequence.
