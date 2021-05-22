@@ -157,10 +157,8 @@ decodeUtf8With onErr bs = withBS bs aux
                       case onErr desc (Just x) of
                         Nothing -> loop $ curPtr' `plusPtr` 1
                         Just c
-                          -- TODO This is problematic, because replacement characters
-                          -- can be longer than one UTF8 code unit (which is byte),
-                          -- but we have allocated exactly len bytes.
-                          -- See TODO below for more context.
+                          -- TODO This is problematic, because even BMP replacement characters
+                          -- can take longer than one UTF8 code unit (which is byte).
                           | c > '\xFFFF' -> throwUnsupportedReplChar
                           | otherwise -> do
                               destOff <- peek destOffPtr
@@ -170,7 +168,9 @@ decodeUtf8With onErr bs = withBS bs aux
                               poke destOffPtr (destOff + intToCSize w)
                               loop $ curPtr' `plusPtr` 1
             loop ptr
-    (unsafeIOToST . go) =<< A.new len
+    -- TODO (*2) assumes that invalid input is asymptotically rare.
+    -- This is incorrect in general, but for now we just want to pass tests.
+    (unsafeIOToST . go) =<< A.new (len * 2 + 4)
    where
     desc = "Data.Text.Internal.Encoding.decodeUtf8: Invalid UTF-8 stream"
 
@@ -304,11 +304,11 @@ streamDecodeUtf8With ::
 streamDecodeUtf8With onErr = decodeChunk B.empty 0 0
  where
   -- We create a slightly larger than necessary buffer to accommodate a
-  -- potential surrogate pair started in the last buffer
+  -- potential code point started in the last buffer
   decodeChunk :: ByteString -> CodePoint -> DecoderState -> ByteString
               -> Decoding
   decodeChunk undecoded0 codepoint0 state0 bs = withBS bs aux where
-    aux fp len = runST $ (unsafeIOToST . decodeChunkToBuffer) =<< A.new (len+1)
+    aux fp len = runST $ (unsafeIOToST . decodeChunkToBuffer) =<< A.new (len+3)
        where
         decodeChunkToBuffer :: A.MArray s -> IO Decoding
         decodeChunkToBuffer dest = unsafeWithForeignPtr fp $ \ptr ->

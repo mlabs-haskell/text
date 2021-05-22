@@ -79,8 +79,8 @@ _hs_text_decode_latin1(uint8_t *dest, const uint8_t *src,
     if(codepoint < 0x80){
       *dest++ = (uint8_t)codepoint;
     } else {
-      *dest++ = 0xC0 + (uint8_t)(codepoint >> 6);
-      *dest++ = 0x80 + (uint8_t)(codepoint & 0x3F);
+      *dest++ = (uint8_t) (0xC0 + (codepoint >> 6));
+      *dest++ = (uint8_t) (0x80 + (codepoint & 0x3F));
     }
   }
 
@@ -133,49 +133,28 @@ _hs_text_decode_utf8_int(uint8_t *const dest, size_t *destoff,
   uint32_t codepoint = *codepoint0;
 
   while (s < srcend) {
-#if defined(__i386__) || defined(__x86_64__)
-    /*
-     * This code will only work on a little-endian system that
-     * supports unaligned loads.
-     *
-     * It gives a substantial speed win on data that is purely or
-     * partly ASCII (e.g. HTML), at only a slight cost on purely
-     * non-ASCII text.
-     */
-
-    if (state == UTF8_ACCEPT) {
-      while (s < srcend - 4) {
-        codepoint = *((uint32_t *) s);
-        if ((codepoint & 0x80808080) != 0)
-          break;
-        s += 4;
-        /*
-         * Tried 32-bit stores here, but the extra bit-twiddling
-         * slowed the code down.
-         * TODO Now we can just copy, no need for bit-twiddling
-         */
-        *d++ = (uint8_t) (codepoint & 0xff);
-        *d++ = (uint8_t) ((codepoint >> 8) & 0xff);
-        *d++ = (uint8_t) ((codepoint >> 16) & 0xff);
-        *d++ = (uint8_t) ((codepoint >> 24) & 0xff);
-      }
-      last = s;
-    } /* end if (state == UTF8_ACCEPT) */
-#endif
-
     if (decode(&state, &codepoint, *s++) != UTF8_ACCEPT) {
       if (state != UTF8_REJECT)
-	continue;
+	      continue;
       break;
     }
 
-    /* TODO this is broken for now */
-    if (codepoint <= 0xffff)
-      *d++ = (uint16_t) codepoint;
-    else {
-      *d++ = (uint16_t) (0xD7C0 + (codepoint >> 10));
-      *d++ = (uint16_t) (0xDC00 + (codepoint & 0x3FF));
+    if(codepoint < 0x80){
+      *d++ = (uint8_t) codepoint;
+    } else if(codepoint < 0x800){
+      *d++ = (uint8_t) (0xC0 + (codepoint >> 6));
+      *d++ = (uint8_t) (0x80 + (codepoint & 0x3F));
+    } else if(codepoint < 0x10000){
+      *d++ = (uint8_t) (0xE0 + (codepoint >> 12));
+      *d++ = (uint8_t) (0x80 + ((codepoint >> 6) & 0x3F));
+      *d++ = (uint8_t) (0x80 + (codepoint & 0x3F));
+    } else {
+      *d++ = (uint8_t) (0xF0 + (codepoint >> 18));
+      *d++ = (uint8_t) (0x80 + ((codepoint >> 12) & 0x3F));
+      *d++ = (uint8_t) (0x80 + ((codepoint >> 6) & 0x3F));
+      *d++ = (uint8_t) (0x80 + (codepoint & 0x3F));
     }
+
     last = s;
   }
 
