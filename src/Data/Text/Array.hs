@@ -27,6 +27,7 @@ module Data.Text.Array
       Array(..)
     , MArray(..)
     -- * Functions
+    , resizeM
     , copyM
     , copyI
     , empty
@@ -44,6 +45,7 @@ module Data.Text.Array
 
 #if defined(ASSERTS)
 import Control.Exception (assert)
+-- TODO replace with getSizeofMutableByteArray#
 import GHC.Base (sizeofMutableByteArray#)
 import GHC.Stack
 #endif
@@ -54,7 +56,7 @@ import Data.Text.Internal.Unsafe.Shift (shiftR)
 import Foreign.C.Types (CInt(CInt), CSize(CSize))
 import GHC.Base (ByteArray#, MutableByteArray#, Int(..),
                  indexWord8Array#, newByteArray#,
-                 unsafeFreezeByteArray#, writeWord8Array#, sizeofByteArray#, writeWord8ArrayAsWord16#, writeWord8ArrayAsWord32#)
+                 unsafeFreezeByteArray#, writeWord8Array#, sizeofByteArray#, writeWord8ArrayAsWord16#, writeWord8ArrayAsWord32#, resizeMutableByteArray#)
 import GHC.ST (ST(..), runST)
 import GHC.Word (Word8(..), Word16(..), Word32(..))
 import Prelude hiding (length, read)
@@ -183,6 +185,11 @@ run2 k = runST (do
                  arr <- unsafeFreeze marr
                  return (arr,b))
 {-# INLINE run2 #-}
+
+resizeM :: MArray s -> Int -> ST s (MArray s)
+resizeM ma@MArray{..} i@(I# i#) = ST $ \s1# ->
+  case resizeMutableByteArray# maBA i# s1# of
+    (# s2#, newArr #) -> (# s2#, MArray newArr #)
 
 -- | Copy some elements of a mutable array.
 copyM :: MArray s               -- ^ Destination
