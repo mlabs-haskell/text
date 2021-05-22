@@ -72,12 +72,19 @@ utf8Length c = word64ToInt $ 4 - (magic `unsafeShiftR` wordToInt (bitLength `shi
     magic :: Word64
     magic = 0b0101010101101010101111111111111111
 
+-- This is a branchless version of
+-- utf8LengthByLeader w
+--   | w < 0x80  = 1
+--   | w < 0xE0  = 2
+--   | w < 0xF0  = 3
+--   | otherwise = 4
 utf8LengthByLeader :: Word8 -> Int
-utf8LengthByLeader w
-  | w < 0x80  = 1
-  | w < 0xE0  = 2
-  | w < 0xF0  = 3
-  | otherwise = 4
+utf8LengthByLeader w = wordToInt $ 4 - (magic `unsafeShiftR` wordToInt (bitLength `shiftL` 1) .&. 3)
+  where
+    bitLength :: Word
+    bitLength = intToWord (countLeadingZeros (maxBound - w))
+    magic :: Word
+    magic = 0b01101011
 
 ord2' :: Char -> (Int, Int)
 ord2' c = (x1, x2)
@@ -232,6 +239,12 @@ intToWord = fromIntegral
 
 word64ToInt :: Word64 -> Int
 word64ToInt = fromIntegral
+
+-- word16ToInt :: Word16 -> Int
+-- word16ToInt = fromIntegral
+
+word8ToInt :: Word8 -> Int
+word8ToInt = fromIntegral
 
 wordToInt :: Word -> Int
 wordToInt = fromIntegral
