@@ -120,13 +120,12 @@ decodeLatin1 ::
 #endif
   ByteString -> Text
 decodeLatin1 bs = withBS bs aux where
-  aux fp len = text a 0 len
+  aux fp len = text a 0 actualLen
    where
-    -- TODO this is broken now: need to allocate 2*len
-    a = A.run (A.new len >>= unsafeIOToST . go)
-    go dest = unsafeWithForeignPtr fp $ \ptr -> do
-      c_decode_latin1 (A.maBA dest) ptr (ptr `plusPtr` len)
-      return dest
+    (a, actualLen) = A.run2 (A.new (2 * len) >>= unsafeIOToST . go)
+    go dest = unsafeWithForeignPtr fp $ \src -> do
+      destLen <- c_decode_latin1 (A.maBA dest) src (src `plusPtr` len)
+      return (dest, destLen)
 
 -- | Decode a 'ByteString' containing UTF-8 encoded text.
 --
@@ -545,4 +544,4 @@ foreign import ccall unsafe "_hs_text_decode_utf8_state" c_decode_utf8_with_stat
     -> Ptr CodePoint -> Ptr DecoderState -> IO (Ptr Word8)
 
 foreign import ccall unsafe "_hs_text_decode_latin1" c_decode_latin1
-    :: MutableByteArray# s -> Ptr Word8 -> Ptr Word8 -> IO ()
+    :: MutableByteArray# s -> Ptr Word8 -> Ptr Word8 -> IO Int

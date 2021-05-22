@@ -67,12 +67,7 @@ decode(uint32_t *state, uint32_t* codep, uint32_t byte) {
   return *state = utf8d[256 + *state + type];
 }
 
-/*
- * The ISO 8859-1 (aka latin-1) code points correspond exactly to the first 256 unicode
- * code-points, therefore we can trivially convert from a latin-1 encoded bytestring to
- * an UTF16 array
- */
-void
+size_t
 _hs_text_decode_latin1(uint8_t *dest, const uint8_t *src,
                        const uint8_t *srcend)
 {
@@ -82,12 +77,14 @@ _hs_text_decode_latin1(uint8_t *dest, const uint8_t *src,
   while (p != srcend){
     uint8_t codepoint = *p++;
     if(codepoint < 0x80){
-      *dest++ = codepoint;
+      *dest++ = (uint8_t)codepoint;
     } else {
-      *dest++ = 0xC0 + (codepoint >> 6);
-      *dest++ = 0x80 + (codepoint & 0x40);
+      *dest++ = 0xC0 + (uint8_t)(codepoint >> 6);
+      *dest++ = 0x80 + (uint8_t)(codepoint & 0x3F);
     }
   }
+
+  return (dest - dest0);
 }
 
 /*
