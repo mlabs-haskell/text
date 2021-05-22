@@ -1,4 +1,5 @@
 {-# LANGUAGE CPP, MagicHash, BangPatterns #-}
+{-# LANGUAGE BinaryLiterals #-}
 
 -- |
 -- Module      : Data.Text.Internal.Encoding.Utf8
@@ -33,11 +34,11 @@ module Data.Text.Internal.Encoding.Utf8
     , validate4
     ) where
 
-import Data.Bits ((.&.))
+import Data.Bits
 import Data.Char (ord)
-import Data.Text.Internal.Unsafe.Shift (shiftR)
 import GHC.Exts
-import GHC.Word (Word8(..))
+import GHC.Word (Word8(..), Word16, Word32, Word64)
+import GHC.ByteOrder
 
 #if !MIN_VERSION_base(4,16,0)
 -- harmless to import, except for warnings that it is unused.
@@ -53,13 +54,19 @@ between :: Word8                -- ^ byte to check
 between x y z = x >= y && x <= z
 {-# INLINE between #-}
 
--- TODO make branchless by looking into Word64 by clz (ord c)
+-- This is a branchless version of
+-- utf8Length c
+--   | ord c < 0x80    = 1
+--   | ord c < 0x800   = 2
+--   | ord c < 0x10000 = 3
+--   | otherwise       = 4
 utf8Length :: Char -> Int
-utf8Length c
-  | ord c < 0x80    = 1
-  | ord c < 0x800   = 2
-  | ord c < 0x10000 = 3
-  | otherwise       = 4
+utf8Length c = word64ToInt $ 4 - (magic `unsafeShiftR` wordToInt (bitLength `shiftL` 1) .&. 3)
+  where
+    bitLength :: Word
+    bitLength = intToWord (finiteBitSize (0 :: Int)) - intToWord (countLeadingZeros (ord c))
+    magic :: Word64
+    magic = 0b0101010101101010101111111111111111
 
 ord2 :: Char -> (Word8,Word8)
 ord2 c =
@@ -175,3 +182,21 @@ validate4 x1 x2 x3 x4 = validate4_1 || validate4_2 || validate4_3
 
 intToWord8 :: Int -> Word8
 intToWord8 = fromIntegral
+
+intToWord16 :: Int -> Word16
+intToWord16 = fromIntegral
+
+intToWord32 :: Int -> Word32
+intToWord32 = fromIntegral
+
+-- wordToWord8 :: Word -> Word8
+-- wordToWord8 = fromIntegral
+
+intToWord :: Int -> Word
+intToWord = fromIntegral
+
+word64ToInt :: Word64 -> Int
+word64ToInt = fromIntegral
+
+wordToInt :: Word -> Int
+wordToInt = fromIntegral
