@@ -235,7 +235,7 @@ mapAccumL ::
 mapAccumL f z0 (Stream next0 s0 len) = (nz, I.text na 0 nl)
   where
     (na, (nz, nl)) = A.run2 (A.new mlen >>= \arr -> outer arr mlen z0 s0 0)
-      where mlen = upperBound 4 len
+      where mlen = upperBound 4 len + 3
     outer arr top = loop
       where
         loop !z !s !i =
@@ -243,12 +243,12 @@ mapAccumL f z0 (Stream next0 s0 len) = (nz, I.text na 0 nl)
               Done          -> return (arr, (z, i))
               Skip s'       -> loop z s' i
               Yield x s'
-                | i + cLen > top  -> {-# SCC "mapAccumL/resize" #-} do
+                -- simply check for the worst case
+                | i + 4 > top  -> {-# SCC "mapAccumL/resize" #-} do
                                let top' = (top + 1) `shiftL` 1
                                arr' <- A.resizeM arr top'
                                outer arr' top' z s i
-                | otherwise -> do _ <- unsafeWrite arr i c
+                | otherwise -> do cLen <- unsafeWrite arr i c
                                   loop z' s' (i + cLen)
                 where (z', c) = f z x
-                      cLen = U8.utf8Length c
 {-# INLINE [0] mapAccumL #-}
