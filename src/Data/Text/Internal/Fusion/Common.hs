@@ -108,7 +108,7 @@ import qualified Data.List as L
 import qualified Prelude as P
 import Data.Char (isLetter, isSpace)
 import Data.Int (Int64)
-import Data.Text.Internal.Encoding.Utf8 (chr2, chr3, chr4)
+import Data.Text.Internal.Encoding.Utf8 (chr2, chr3, chr4, utf8LengthByLeader)
 import Data.Text.Internal.Fusion.Types
 import Data.Text.Internal.Fusion.CaseMapping (foldMapping, lowerMapping, titleMapping,
                                      upperMapping)
@@ -150,15 +150,15 @@ streamCString# addr = Stream step 0 unknownSize
   where
     step !i
         | b == 0    = Done
-        | b < 0x80  = Yield (unsafeChr8 b) (i+1)
-        | b < 0xE0  = let !c = chr2 b (next 1)
-                      in Yield c (i+2)
-        | b < 0xF0  = let !c = chr3 b (next 1) (next 2)
-                      in Yield c (i+3)
-        | otherwise = let !c = chr4 b (next 1) (next 2) (next 3)
-                      in Yield c (i+4)
-      where b      = at# i
+        | otherwise = Yield chr (i + l)
+      where b = at# i
+            l = utf8LengthByLeader b
             next n = at# (i+n)
+            chr = case l of
+              1 -> unsafeChr8 b
+              2 -> chr2 b (next 1)
+              3 -> chr3 b (next 1) (next 2)
+              _ -> chr4 b (next 1) (next 2) (next 3)
     at# (I# i#) = W8# (indexWord8OffAddr# addr i#)
 {-# INLINE [0] streamCString# #-}
 

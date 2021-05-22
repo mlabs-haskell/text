@@ -29,7 +29,7 @@ module Data.Text.Unsafe
 import Control.Exception (assert)
 import GHC.Stack
 #endif
-import Data.Text.Internal.Encoding.Utf8 (chr2, chr3, chr4)
+import Data.Text.Internal.Encoding.Utf8 (chr2, chr3, chr4, utf8LengthByLeader)
 import Data.Text.Internal (Text(..))
 import Data.Text.Internal.Unsafe (inlineInterleaveST, inlinePerformIO)
 import Data.Text.Internal.Unsafe.Char (unsafeChr8)
@@ -40,11 +40,11 @@ import GHC.IO (unsafeDupablePerformIO)
 -- omits the check for the empty case, so there is an obligation on
 -- the programmer to provide a proof that the 'Text' is non-empty.
 unsafeHead :: Text -> Char
-unsafeHead (Text arr off _len)
-    | m0 < 0x80                  = unsafeChr8 m0
-    | m0 < 0xE0                  = chr2 m0 m1
-    | m0 < 0xF0                  = chr3 m0 m1 m2
-    | otherwise                  = chr4 m0 m1 m2 m3
+unsafeHead (Text arr off _len) = case utf8LengthByLeader m0 of
+    1 -> unsafeChr8 m0
+    2 -> chr2 m0 m1
+    3 -> chr3 m0 m1 m2
+    _ -> chr4 m0 m1 m2 m3
     where m0 = A.unsafeIndex arr off
           m1 = A.unsafeIndex arr (off+1)
           m2 = A.unsafeIndex arr (off+2)
@@ -74,26 +74,24 @@ iter ::
   HasCallStack =>
 #endif
   Text -> Int -> Iter
-iter (Text arr off _len) i
-    | m0 < 0x80 = Iter (unsafeChr8 m0)    1
-    | m0 < 0xE0 = Iter (chr2 m0 m1)       2
-    | m0 < 0xF0 = Iter (chr3 m0 m1 m2)    3
-    | otherwise = Iter (chr4 m0 m1 m2 m3) 4
+iter (Text arr off _len) i = Iter chr l
   where m0 = A.unsafeIndex arr j
         m1 = A.unsafeIndex arr (j+1)
         m2 = A.unsafeIndex arr (j+2)
         m3 = A.unsafeIndex arr (j+3)
         j = off + i
+        l = utf8LengthByLeader m0
+        chr = case l of
+            1 -> unsafeChr8 m0
+            2 -> chr2 m0 m1
+            3 -> chr3 m0 m1 m2
+            _ -> chr4 m0 m1 m2 m3
 {-# INLINE iter #-}
 
 -- | /O(1)/ Iterate one step through a UTF-8 array, returning the
 -- delta to add to give the next offset to iterate at.
 iter_ :: Text -> Int -> Int
-iter_ (Text arr off _len) i
-    | m < 0x80 = 1
-    | m < 0xE0 = 2
-    | m < 0xF0 = 3
-    | otherwise = 4
+iter_ (Text arr off _len) i = utf8LengthByLeader m
   where m = A.unsafeIndex arr (off+i)
 {-# INLINE iter_ #-}
 

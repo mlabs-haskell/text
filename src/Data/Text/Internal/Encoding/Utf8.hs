@@ -19,6 +19,7 @@
 -- Basic UTF-8 validation and character manipulation.
 module Data.Text.Internal.Encoding.Utf8
     ( utf8Length
+    , utf8LengthByLeader
     -- Decomposition
     , ord2
     , ord2_16
@@ -70,6 +71,13 @@ utf8Length c = word64ToInt $ 4 - (magic `unsafeShiftR` wordToInt (bitLength `shi
     bitLength = intToWord (finiteBitSize (0 :: Int)) - intToWord (countLeadingZeros (ord c))
     magic :: Word64
     magic = 0b0101010101101010101111111111111111
+
+utf8LengthByLeader :: Word8 -> Int
+utf8LengthByLeader w
+  | w < 0x80  = 1
+  | w < 0xE0  = 2
+  | w < 0xF0  = 3
+  | otherwise = 4
 
 ord2' :: Char -> (Int, Int)
 ord2' c = (x1, x2)
