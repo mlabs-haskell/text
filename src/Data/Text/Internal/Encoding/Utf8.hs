@@ -20,6 +20,8 @@
 module Data.Text.Internal.Encoding.Utf8
     ( utf8Length
     , utf8LengthByLeader
+    , isTrailer
+    , countLeaders
     -- Decomposition
     , ord2
     , ord2_16
@@ -43,6 +45,7 @@ module Data.Text.Internal.Encoding.Utf8
 
 import Data.Bits
 import Data.Char (ord)
+import Data.Int
 import GHC.Exts
 import GHC.Word (Word8(..), Word16(..), Word32(..), Word64)
 import GHC.ByteOrder
@@ -83,6 +86,21 @@ utf8Length c = word64ToInt $ 4 - (magic `unsafeShiftR` wordToInt (bitLength `shi
 ---   | otherwise = 4
 utf8LengthByLeader :: Word8 -> Int
 utf8LengthByLeader w = max 1 (countLeadingZeros (maxBound - w))
+
+-- isTrailer :: Word8 -> Bool
+-- isTrailer w = popCount (v1 .|. v2) == 0
+--   where
+--     v1 = (w .&. 0x80) `xor` 0x80
+--     v2 = (w .&. 0x40) `shiftL` 1
+
+isTrailer :: Word8 -> Bool
+isTrailer w = word8ToInt8 w < -0x40
+
+countLeaders :: Word64 -> Int
+countLeaders w = popCount (v1 .|. v2)
+  where
+    v1 = (w .&. 0x8080808080808080) `xor` 0x8080808080808080
+    v2 = (w .&. 0x4040404040404040) `shiftL` 1
 
 ord2' :: Char -> (Int, Int)
 ord2' c = (x1, x2)
@@ -281,3 +299,6 @@ word64ToInt = fromIntegral
 
 wordToInt :: Word -> Int
 wordToInt = fromIntegral
+
+word8ToInt8 :: Word8 -> Int8
+word8ToInt8 = fromIntegral

@@ -32,6 +32,7 @@
 -- <http://hackage.haskell.org/package/text-icu text-icu package >.
 --
 
+{-# LANGUAGE UnliftedFFITypes #-}
 module Data.Text
     (
     -- * Strict vs lazy types
@@ -201,7 +202,7 @@ import Prelude (Char, Bool(..), Int, Maybe(..), String,
                 Eq(..), Ord(..), Ordering(..), (++),
                 Read(..),
                 (&&), (||), (+), (-), (.), ($), ($!), (>>),
-                not, return, otherwise, quot)
+                not, return, otherwise, quot, IO)
 import Control.DeepSeq (NFData(rnf))
 #if defined(ASSERTS)
 import Control.Exception (assert)
@@ -227,20 +228,21 @@ import Data.Text.Internal (Text(..), empty, firstf, mul, safe, text)
 import Data.Text.Show (singleton, unpack, unpackCString#)
 import qualified Prelude as P
 import Data.Text.Unsafe (Iter(..), iter, iter_, lengthWord8, reverseIter,
-                         reverseIter_, unsafeHead, unsafeTail)
+                         reverseIter_, unsafeHead, unsafeTail, unsafeDupablePerformIO)
 import qualified Data.Text.Internal.Functions as F
 import Data.Text.Internal.Search (indices)
-import Data.Text.Internal.Unsafe.Shift (UnsafeShift(..))
 #if defined(__HADDOCK__)
 import Data.ByteString (ByteString)
 import qualified Data.Text.Lazy as L
 import Data.Int (Int64)
 #endif
-import GHC.Base (eqInt, neInt, gtInt, geInt, ltInt, leInt)
+import GHC.Base (eqInt, neInt, gtInt, geInt, ltInt, leInt, ByteArray#)
 import qualified GHC.Exts as Exts
 import qualified Language.Haskell.TH.Lib as TH
 import qualified Language.Haskell.TH.Syntax as TH
 import Text.Printf (PrintfArg, formatArg, formatString)
+import Data.Bits
+import Foreign.C.Types
 
 -- $setup
 -- >>> import Data.Text
@@ -1139,15 +1141,15 @@ take :: Int -> Text -> Text
 take n t@(Text arr off len)
     | n <= 0    = empty
     | n >= len  = t
-    | otherwise = text arr off (iterN n t)
+    | otherwise = text arr off (iterN t n)
 {-# INLINE [1] take #-}
 
-iterN :: Int -> Text -> Int
-iterN n t@(Text _arr _off len) = loop 0 0
-  where loop !i !cnt
-            | i >= len || cnt >= n = i
-            | otherwise            = loop (i+d) (cnt+1)
-          where d = iter_ t i
+iterN :: Text -> Int -> Int
+iterN (Text arr off len) n = P.fromIntegral $ unsafeDupablePerformIO $
+    c_iterN (A.aBA arr) (P.fromIntegral off) (P.fromIntegral len) (P.fromIntegral n)
+
+foreign import ccall unsafe "_hs_text_iterN" c_iterN
+    :: ByteArray# -> CSize -> CSize -> CSize -> IO CSize
 
 {-# RULES
 "TEXT take -> fused" [~1] forall n t.
@@ -1188,7 +1190,7 @@ drop n t@(Text arr off len)
     | n <= 0    = t
     | n >= len  = empty
     | otherwise = text arr (off+i) (len-i)
-  where i = iterN n t
+  where i = iterN t n
 {-# INLINE [1] drop #-}
 
 {-# RULES
@@ -1319,7 +1321,7 @@ splitAt :: Int -> Text -> (Text, Text)
 splitAt n t@(Text arr off len)
     | n <= 0    = (empty, t)
     | n >= len  = (t, empty)
-    | otherwise = let k = iterN n t
+    | otherwise = let k = iterN t n
                   in (text arr off k, text arr (off+k) (len-k))
 
 -- | /O(n)/ 'span', applied to a predicate @p@ and text @t@, returns

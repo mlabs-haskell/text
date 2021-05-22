@@ -43,7 +43,7 @@ module Data.Text.Array
     , unsafeWrite
     , unsafeWrite16
     , unsafeWrite32
-    ) where
+    ,unsafeIndexAs64) where
 
 #if defined(ASSERTS)
 import Control.Exception (assert)
@@ -58,9 +58,9 @@ import Data.Text.Internal.Unsafe.Shift (shiftR)
 import Foreign.C.Types (CInt(CInt), CSize(CSize))
 import GHC.Base (ByteArray#, MutableByteArray#, Int(..),
                  indexWord8Array#, newByteArray#,
-                 unsafeFreezeByteArray#, writeWord8Array#, sizeofByteArray#, writeWord8ArrayAsWord16#, writeWord8ArrayAsWord32#, resizeMutableByteArray#, indexWord8ArrayAsWord16#, indexWord8ArrayAsWord32#)
+                 unsafeFreezeByteArray#, writeWord8Array#, sizeofByteArray#, writeWord8ArrayAsWord16#, writeWord8ArrayAsWord32#, resizeMutableByteArray#, indexWord8ArrayAsWord16#, indexWord8ArrayAsWord32#, indexWord64Array#)
 import GHC.ST (ST(..), runST)
-import GHC.Word (Word8(..), Word16(..), Word32(..))
+import GHC.Word (Word8(..), Word16(..), Word32(..), Word64(..))
 import Prelude hiding (length, read)
 
 -- | Immutable array type.
@@ -149,6 +149,21 @@ unsafeIndex32 a@Array{..} i@(I# i#) =
 #endif
   case indexWord8ArrayAsWord32# aBA i# of r# -> (W32# r#)
 {-# INLINE unsafeIndex32 #-}
+
+unsafeIndexAs64 ::
+#if defined(ASSERTS)
+  HasCallStack =>
+#endif
+  Array -> {- offset in words -} Int -> Word64
+unsafeIndexAs64 a@Array{..} i@(I# i#) =
+#if defined(ASSERTS)
+  let word8len = I# (sizeofByteArray# aBA) in
+  if i < 0 || i >= word8len `quot` 8
+  then error ("Data.Text.Array.unsafeIndexAs64: bounds error, offset " ++ show i ++ ", length " ++ show word8len)
+  else
+#endif
+  case indexWord64Array# aBA i# of r# -> (W64# r#)
+{-# INLINE unsafeIndexAs64 #-}
 
 -- | Unchecked write of a mutable array.  May return garbage or crash
 -- on an out-of-bounds access.
