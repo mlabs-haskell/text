@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - master
+      - utf8
   pull_request: {}
 
 defaults:
