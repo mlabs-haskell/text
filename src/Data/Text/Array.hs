@@ -38,20 +38,18 @@ module Data.Text.Array
     , unsafeIndex
     , new
     , unsafeWrite
+    , unsafeWrite16
+    , unsafeWrite32
     ) where
 
 #if defined(ASSERTS)
 import Control.Exception (assert)
-import GHC.Base (getSizeofMutableByteArray#)
 import GHC.Stack (HasCallStack)
 #endif
 import Data.Bits ((.&.), xor, shiftR)
-import GHC.Base (ByteArray#, MutableByteArray#, Int(..),
-                 indexWord8Array#, newByteArray#, sizeofByteArray#,
-                 unsafeFreezeByteArray#, writeWord8Array#,
-                 compareByteArrays#, (-#), copyByteArray#, copyMutableByteArray#)
+import GHC.Exts hiding (toList)
 import GHC.ST (ST(..), runST)
-import GHC.Word (Word8(..))
+import GHC.Word (Word8(..), Word16(..), Word32(..))
 import Prelude hiding (length, read)
 
 -- | Immutable array type.
@@ -141,6 +139,32 @@ unsafeWrite ma@MArray{..} i@(I# i#) (W8# e#) =
   (ST $ \s1# -> case writeWord8Array# maBA i# e# s1# of
     s2# -> (# s2#, () #))
 {-# INLINE unsafeWrite #-}
+
+unsafeWrite16 ::
+#if defined(ASSERTS)
+  HasCallStack =>
+#endif
+  MArray s -> {- offset in bytes! -} Int -> Word16 -> ST s ()
+unsafeWrite16 ma@MArray{..} i@(I# i#) (W16# e#) =
+#if defined(ASSERTS)
+  checkBoundsM ma i 2 >>
+#endif
+  (ST $ \s1# -> case writeWord8ArrayAsWord16# maBA i# e# s1# of
+    s2# -> (# s2#, () #))
+{-# INLINE unsafeWrite16 #-}
+
+unsafeWrite32 ::
+#if defined(ASSERTS)
+  HasCallStack =>
+#endif
+  MArray s -> {- offset in bytes! -} Int -> Word32 -> ST s ()
+unsafeWrite32 ma@MArray{..} i@(I# i#) (W32# e#) =
+#if defined(ASSERTS)
+  checkBoundsM ma i 4 >>
+#endif
+  (ST $ \s1# -> case writeWord8ArrayAsWord32# maBA i# e# s1# of
+    s2# -> (# s2#, () #))
+{-# INLINE unsafeWrite32 #-}
 
 -- | Convert an immutable array to a list.
 toList :: Array -> Int -> Int -> [Word8]

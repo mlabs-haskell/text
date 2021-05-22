@@ -58,29 +58,23 @@ unsafeWrite ::
     HasCallStack =>
 #endif
     A.MArray s -> Int -> Char -> ST s Int
-unsafeWrite marr i c = case utf8Length c of
-    1 -> do
-        let n0 = intToWord8 (ord c)
-        A.unsafeWrite marr i n0
-        return 1
-    2 -> do
-        let (n0, n1) = ord2 c
-        A.unsafeWrite marr i     n0
-        A.unsafeWrite marr (i+1) n1
-        return 2
-    3 -> do
-        let (n0, n1, n2) = ord3 c
-        A.unsafeWrite marr i     n0
-        A.unsafeWrite marr (i+1) n1
-        A.unsafeWrite marr (i+2) n2
-        return 3
-    _ -> do
-        let (n0, n1, n2, n3) = ord4 c
-        A.unsafeWrite marr i     n0
-        A.unsafeWrite marr (i+1) n1
-        A.unsafeWrite marr (i+2) n2
-        A.unsafeWrite marr (i+3) n3
-        return 4
+unsafeWrite marr i c = do
+    let l = utf8Length c
+    case l of
+        1 -> do
+            let n0 = intToWord8 (ord c)
+            A.unsafeWrite marr i n0
+        2 -> do
+            let n01 = ord2_16 c
+            A.unsafeWrite16 marr i n01
+        3 -> do
+            let (n01, n2) = ord3_16_8 c
+            A.unsafeWrite16 marr i n01
+            A.unsafeWrite marr (i+2) n2
+        _ -> do
+            let n0123 = ord4_32 c
+            A.unsafeWrite32 marr i n0123
+    return l
 {-# INLINE unsafeWrite #-}
 
 intToWord8 :: Int -> Word8
