@@ -84,15 +84,15 @@ stream (Text arr off len) = Stream next off (betweenSize (len `shiftR` 2) len)
           where
             n0 = A.unsafeIndex arr i
             n1 = A.unsafeIndex arr (i + 1)
-            n2 = A.unsafeIndex arr (i + 2)
-            n3 = A.unsafeIndex arr (i + 3)
+            n12 = A.unsafeIndex16 arr (i + 1)
+            n0123 = A.unsafeIndex32 arr i
 
             l  = U8.utf8LengthByLeader n0
             chr = case l of
               1 -> unsafeChr8 n0
               2 -> U8.chr2 n0 n1
-              3 -> U8.chr3 n0 n1 n2
-              _ -> U8.chr4 n0 n1 n2 n3
+              3 -> U8.chr3_8_16 n0 n12
+              _ -> U8.chr4_32 n0123
 {-# INLINE [0] stream #-}
 
 -- | /O(n)/ Convert a 'Text' into a 'Stream Char', but iterate
