@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns, CPP, MagicHash, Rank2Types, UnboxedTuples, TypeFamilies #-}
 {-# LANGUAGE TemplateHaskellQuotes #-}
 {-# LANGUAGE Trustworthy #-}
+{-# LANGUAGE UnliftedFFITypes #-}
 
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
@@ -201,7 +202,7 @@ import Prelude (Char, Bool(..), Int, Maybe(..), String,
                 Eq(..), Ord(..), Ordering(..), (++),
                 Read(..),
                 (&&), (||), (+), (-), (.), ($), ($!), (>>),
-                not, return, otherwise, quot)
+                not, return, otherwise, quot, IO)
 import Control.DeepSeq (NFData(rnf))
 #if defined(ASSERTS)
 import Control.Exception (assert)
@@ -228,7 +229,7 @@ import Data.Text.Internal (Text(..), empty, firstf, mul, safe, text)
 import Data.Text.Show (singleton, unpack, unpackCString#)
 import qualified Prelude as P
 import Data.Text.Unsafe (Iter(..), iter, iter_, lengthWord8, reverseIter,
-                         reverseIter_, unsafeHead, unsafeTail)
+                         reverseIter_, unsafeHead, unsafeTail, unsafeDupablePerformIO)
 import qualified Data.Text.Internal.Functions as F
 import Data.Text.Internal.Search (indices)
 #if defined(__HADDOCK__)
@@ -236,7 +237,8 @@ import Data.ByteString (ByteString)
 import qualified Data.Text.Lazy as L
 import Data.Int (Int64)
 #endif
-import GHC.Base (eqInt, neInt, gtInt, geInt, ltInt, leInt)
+import Foreign.C.Types
+import GHC.Base (eqInt, neInt, gtInt, geInt, ltInt, leInt, ByteArray#)
 import qualified GHC.Exts as Exts
 import qualified Language.Haskell.TH.Lib as TH
 import qualified Language.Haskell.TH.Syntax as TH
@@ -1075,11 +1077,11 @@ take n t@(Text arr off len)
 {-# INLINE [1] take #-}
 
 iterN :: Int -> Text -> Int
-iterN n t@(Text _arr _off len) = loop 0 0
-  where loop !i !cnt
-            | i >= len || cnt >= n = i
-            | otherwise            = loop (i+d) (cnt+1)
-          where d = iter_ t i
+iterN n (Text arr off len) = P.fromIntegral $ unsafeDupablePerformIO $
+    c_iterN (A.aBA arr) (P.fromIntegral off) (P.fromIntegral len) (P.fromIntegral n)
+
+foreign import ccall unsafe "_hs_text_iterN" c_iterN
+    :: ByteArray# -> CSize -> CSize -> CSize -> IO CSize
 
 -- | /O(n)/ 'takeEnd' @n@ @t@ returns the suffix remaining after
 -- taking @n@ characters from the end of @t@.
