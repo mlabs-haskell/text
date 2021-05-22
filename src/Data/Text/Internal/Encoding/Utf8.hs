@@ -21,8 +21,11 @@ module Data.Text.Internal.Encoding.Utf8
     ( utf8Length
     -- Decomposition
     , ord2
+    , ord2_16
     , ord3
+    , ord3_16_8
     , ord4
+    , ord4_32
     -- Construction
     , chr2
     , chr3
@@ -68,41 +71,65 @@ utf8Length c = word64ToInt $ 4 - (magic `unsafeShiftR` wordToInt (bitLength `shi
     magic :: Word64
     magic = 0b0101010101101010101111111111111111
 
-ord2 :: Char -> (Word8,Word8)
-ord2 c =
-    -- ord2 is used only in test suite to construct a deliberately invalid ByteString,
-    -- actually violating the assertion, so it is commented out
-    -- assert (n >= 0x80 && n <= 0x07ff)
-    (x1,x2)
-    where
-      n  = ord c
-      x1 = intToWord8 $ (n `shiftR` 6) + 0xC0
-      x2 = intToWord8 $ (n .&. 0x3F)   + 0x80
+ord2' :: Char -> (Int, Int)
+ord2' c = (x1, x2)
+  where
+    n  = ord c
+    x1 = (n `shiftR` 6) + 0xC0
+    x2 = (n .&. 0x3F)   + 0x80
 
-ord3 :: Char -> (Word8,Word8,Word8)
-ord3 c =
-    -- ord3 is used only in test suite to construct a deliberately invalid ByteString,
-    -- actually violating the assertion, so it is commented out
-    -- assert (n >= 0x0800 && n <= 0xffff)
-    (x1,x2,x3)
-    where
-      n  = ord c
-      x1 = intToWord8 $ (n `shiftR` 12) + 0xE0
-      x2 = intToWord8 $ ((n `shiftR` 6) .&. 0x3F) + 0x80
-      x3 = intToWord8 $ (n .&. 0x3F) + 0x80
+ord2 :: Char -> (Word8, Word8)
+ord2 c = (intToWord8 x1, intToWord8 x2)
+  where
+    (x1, x2) = ord2' c
 
-ord4 :: Char -> (Word8,Word8,Word8,Word8)
-ord4 c =
-    -- ord4 is used only in test suite to construct a deliberately invalid ByteString,
-    -- actually violating the assertion, so it is commented out
-    -- assert (n >= 0x10000)
-    (x1,x2,x3,x4)
-    where
-      n  = ord c
-      x1 = intToWord8 $ (n `shiftR` 18) + 0xF0
-      x2 = intToWord8 $ ((n `shiftR` 12) .&. 0x3F) + 0x80
-      x3 = intToWord8 $ ((n `shiftR` 6) .&. 0x3F) + 0x80
-      x4 = intToWord8 $ (n .&. 0x3F) + 0x80
+ord2_16 :: Char -> Word16
+ord2_16 c = intToWord16 $ case targetByteOrder of
+  BigEndian    -> (x1 `shiftL` 8) + x2
+  LittleEndian -> x1 + (x2 `shiftL` 8)
+  where
+    (x1, x2) = ord2' c
+
+ord3' :: Char -> (Int, Int, Int)
+ord3' c = (x1, x2, x3)
+  where
+    n  = ord c
+    x1 = (n `shiftR` 12) + 0xE0
+    x2 = ((n `shiftR` 6) .&. 0x3F) + 0x80
+    x3 = (n .&. 0x3F) + 0x80
+
+ord3 :: Char -> (Word8, Word8, Word8)
+ord3 c = (intToWord8 x1, intToWord8 x2, intToWord8 x3)
+  where
+    (x1, x2, x3) = ord3' c
+
+ord3_16_8 :: Char -> (Word16, Word8)
+ord3_16_8 c = (intToWord16 $ case targetByteOrder of
+  BigEndian    -> (x1 `shiftL` 8) + x2
+  LittleEndian -> x1 + (x2 `shiftL` 8), intToWord8 x3)
+  where
+    (x1, x2, x3) = ord3' c
+
+ord4' :: Char -> (Int, Int, Int, Int)
+ord4' c = (x1, x2, x3, x4)
+  where
+    n  = ord c
+    x1 = (n `shiftR` 18) + 0xF0
+    x2 = ((n `shiftR` 12) .&. 0x3F) + 0x80
+    x3 = ((n `shiftR` 6) .&. 0x3F) + 0x80
+    x4 = (n .&. 0x3F) + 0x80
+
+ord4 :: Char -> (Word8, Word8, Word8, Word8)
+ord4 c = (intToWord8 x1, intToWord8 x2, intToWord8 x3, intToWord8 x4)
+  where
+    (x1, x2, x3, x4) = ord4' c
+
+ord4_32 :: Char -> Word32
+ord4_32 c = intToWord32 $ case targetByteOrder of
+  BigEndian    -> (x1 `shiftL` 24) + (x2 `shiftL` 16) + (x3 `shiftL` 8) + x4
+  LittleEndian -> x1 + (x2 `shiftL` 8) + (x3 `shiftL` 16) + (x4 `shiftL` 24)
+  where
+    (x1, x2, x3, x4) = ord4' c
 
 chr2 :: Word8 -> Word8 -> Char
 chr2 (W8# x1#) (W8# x2#) = C# (chr# (z1# +# z2#))

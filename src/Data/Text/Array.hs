@@ -38,6 +38,8 @@ module Data.Text.Array
     , unsafeIndex
     , new
     , unsafeWrite
+    , unsafeWrite16
+    , unsafeWrite32
     ) where
 
 #if defined(ASSERTS)
@@ -52,9 +54,9 @@ import Data.Text.Internal.Unsafe.Shift (shiftR)
 import Foreign.C.Types (CInt(CInt), CSize(CSize))
 import GHC.Base (ByteArray#, MutableByteArray#, Int(..),
                  indexWord8Array#, newByteArray#,
-                 unsafeFreezeByteArray#, writeWord8Array#, sizeofByteArray#)
+                 unsafeFreezeByteArray#, writeWord8Array#, sizeofByteArray#, writeWord8ArrayAsWord16#, writeWord8ArrayAsWord32#)
 import GHC.ST (ST(..), runST)
-import GHC.Word (Word8(..))
+import GHC.Word (Word8(..), Word16(..), Word32(..))
 import Prelude hiding (length, read)
 
 -- | Immutable array type.
@@ -129,6 +131,34 @@ unsafeWrite ma@MArray{..} i@(I# i#) (W8# e#) = ST $ \s1# ->
   case writeWord8Array# maBA i# e# s1# of
     s2# -> (# s2#, () #)
 {-# INLINE unsafeWrite #-}
+
+unsafeWrite16 ::
+#if defined(ASSERTS)
+  HasCallStack =>
+#endif
+  MArray s -> {- offset in bytes! -} Int -> Word16 -> ST s ()
+unsafeWrite16 ma@MArray{..} i@(I# i#) (W16# e#) = ST $ \s1# ->
+#if defined(ASSERTS)
+  let word8len = I# (sizeofMutableByteArray# maBA) in
+  if i < 0 || i >= word8len - 1 then error ("Data.Text.Array.unsafeWrite16: bounds error, offset " ++ show i ++ ", length " ++ show word8len) else
+#endif
+  case writeWord8ArrayAsWord16# maBA i# e# s1# of
+    s2# -> (# s2#, () #)
+{-# INLINE unsafeWrite16 #-}
+
+unsafeWrite32 ::
+#if defined(ASSERTS)
+  HasCallStack =>
+#endif
+  MArray s -> {- offset in bytes! -} Int -> Word32 -> ST s ()
+unsafeWrite32 ma@MArray{..} i@(I# i#) (W32# e#) = ST $ \s1# ->
+#if defined(ASSERTS)
+  let word8len = I# (sizeofMutableByteArray# maBA) in
+  if i < 0 || i >= word8len - 3 then error ("Data.Text.Array.unsafeWrite32: bounds error, offset " ++ show i ++ ", length " ++ show word8len) else
+#endif
+  case writeWord8ArrayAsWord32# maBA i# e# s1# of
+    s2# -> (# s2#, () #)
+{-# INLINE unsafeWrite32 #-}
 
 -- | Convert an immutable array to a list.
 toList :: Array -> Int -> Int -> [Word8]
