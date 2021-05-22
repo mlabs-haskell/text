@@ -54,7 +54,7 @@ import Prelude (Bool(..), Char, Maybe(..), Monad(..), Int,
                 otherwise)
 import Data.Text.Internal (Text(..))
 import Data.Text.Internal.Private (runText)
-import Data.Text.Internal.Unsafe.Char (ord, unsafeChr8, unsafeWrite)
+import Data.Text.Internal.Unsafe.Char (unsafeChr8, unsafeWrite)
 import Data.Text.Internal.Unsafe.Shift (shiftL, shiftR)
 import qualified Data.Text.Array as A
 import qualified Data.Text.Internal.Fusion.Common as S
@@ -179,10 +179,7 @@ reverse (Stream next s len0)
                      | otherwise -> do
                        _ <- unsafeWrite marr (i - least) x
                        loop s1 (i - least - 1) len marr
-            where least | ord x < 0x80    = 0
-                        | ord x < 0x800   = 1
-                        | ord x < 0x10000 = 2
-                        | otherwise       = 3
+            where least = U8.utf8Length x - 1
 {-# INLINE [0] reverse #-}
 
 -- | /O(n)/ Perform the equivalent of 'scanr' over a list, only with
@@ -255,8 +252,5 @@ mapAccumL f z0 (Stream next0 s0 len) = (nz, I.text na 0 nl)
                 | otherwise -> do d <- unsafeWrite arr i c
                                   loop z' s' (i+d)
                 where (z',c) = f z x
-                      j | ord c < 0x80    = i
-                        | ord c < 0x800   = i + 1
-                        | ord c < 0x10000 = i + 2
-                        | otherwise       = i + 3
+                      j = i + U8.utf8Length c - 1
 {-# INLINE [0] mapAccumL #-}

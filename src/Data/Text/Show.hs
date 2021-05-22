@@ -20,8 +20,8 @@ module Data.Text.Show
     ) where
 
 import Control.Monad.ST (ST)
-import Data.Char (ord)
 import Data.Text.Internal (Text(..), empty_, safe)
+import Data.Text.Internal.Encoding.Utf8 (utf8Length)
 import Data.Text.Internal.Fusion (stream, unstream)
 import Data.Text.Internal.Unsafe.Char (unsafeWrite)
 import GHC.Prim (Addr#)
@@ -96,9 +96,6 @@ singleton_ c = Text (A.run x) 0 len
         x = do arr <- A.new len
                _ <- unsafeWrite arr 0 d
                return arr
-        len | ord d < 0x80    = 1
-            | ord d < 0x800   = 2
-            | ord d < 0x10000 = 3
-            | otherwise       = 4
+        len = utf8Length d
         d = safe c
 {-# NOINLINE singleton_ #-}

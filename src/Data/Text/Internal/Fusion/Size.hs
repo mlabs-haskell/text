@@ -37,7 +37,7 @@ module Data.Text.Internal.Fusion.Size
     , isEmpty
     ) where
 
-import Data.Char (ord)
+import Data.Text.Internal.Encoding.Utf8 (utf8Length)
 import Data.Text.Internal (mul)
 #if defined(ASSERTS)
 import Control.Exception (assert)
@@ -54,13 +54,8 @@ exactly _ = Nothing
 {-# INLINE exactly #-}
 
 -- | The 'Size' of the given code point.
--- TODO make branchless by looking into Word64 by clz (ord c)
 charSize :: Char -> Size
-charSize c
-  | ord c < 0x80    = exactSize 1
-  | ord c < 0x800   = exactSize 2
-  | ord c < 0x10000 = exactSize 3
-  | otherwise       = exactSize 4
+charSize = exactSize . utf8Length
 
 -- | The 'Size' of @n@ code points.
 codePointsSize :: Int -> Size

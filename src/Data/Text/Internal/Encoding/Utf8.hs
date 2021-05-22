@@ -17,9 +17,9 @@
 --
 -- Basic UTF-8 validation and character manipulation.
 module Data.Text.Internal.Encoding.Utf8
-    (
+    ( utf8Length
     -- Decomposition
-      ord2
+    , ord2
     , ord3
     , ord4
     -- Construction
@@ -52,6 +52,14 @@ between :: Word8                -- ^ byte to check
         -> Bool
 between x y z = x >= y && x <= z
 {-# INLINE between #-}
+
+-- TODO make branchless by looking into Word64 by clz (ord c)
+utf8Length :: Char -> Int
+utf8Length c
+  | ord c < 0x80    = 1
+  | ord c < 0x800   = 2
+  | ord c < 0x10000 = 3
+  | otherwise       = 4
 
 ord2 :: Char -> (Word8,Word8)
 ord2 c =
