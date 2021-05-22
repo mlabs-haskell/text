@@ -17,9 +17,11 @@ on:
   push:
     branches:
       - master
+      - utf8
   pull_request:
     branches:
       - master
+      - utf8
 jobs:
   linux:
     name: Haskell-CI - Linux - ${{ matrix.compiler }}
