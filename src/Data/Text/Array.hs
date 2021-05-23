@@ -73,7 +73,7 @@ data MArray s = MArray { maBA :: MutableByteArray# s }
 new :: forall s. Int -> ST s (MArray s)
 new (I# len#)
 #if defined(ASSERTS)
-  | I# len < 0 = error "Data.Text.Array.new: size overflow"
+  | I# len# < 0 = error "Data.Text.Array.new: size overflow"
 #endif
   | otherwise = ST $ \s1# ->
     case newByteArray# len# s1# of
