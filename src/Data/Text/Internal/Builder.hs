@@ -186,6 +186,7 @@ fromString str = Builder $ \k (Buffer p0 o0 u0 l0) ->
     let loop !marr !o !u !l [] = k (Buffer marr o u l)
         loop marr o u l s@(c:cs)
             | l <= 1 = do
+                A.shrinkM marr (o + u)
                 arr <- A.unsafeFreeze marr
                 let !t = Text arr o u
                 marr' <- A.new chunkSize
@@ -239,7 +240,8 @@ flush :: Builder
 flush = Builder $ \ k buf@(Buffer p o u l) ->
     if u == 0
     then k buf
-    else do arr <- A.unsafeFreeze p
+    else do A.shrinkM p (o + u)
+            arr <- A.unsafeFreeze p
             let !b = Buffer p (o+u) 0 l
                 !t = Text arr o u
             ts <- inlineInterleaveST (k b)

@@ -28,6 +28,7 @@ module Data.Text.Array
     , MArray(..)
     -- * Functions
     , resizeM
+    , shrinkM
     , copyM
     , copyI
     , empty
@@ -46,7 +47,6 @@ module Data.Text.Array
     ) where
 
 #if defined(ASSERTS)
--- TODO employ resizeMutableByteArray# instead of cropping Text
 import GHC.Stack (HasCallStack)
 #endif
 import Data.Text.Internal.Unsafe (inlinePerformIO)
@@ -219,6 +219,11 @@ resizeM :: MArray s -> Int -> ST s (MArray s)
 resizeM ma@MArray{..} i@(I# i#) = ST $ \s1# ->
   case resizeMutableByteArray# maBA i# s1# of
     (# s2#, newArr #) -> (# s2#, MArray newArr #)
+
+shrinkM :: MArray s -> Int -> ST s ()
+shrinkM ma@MArray{..} i@(I# i#) = ST $ \s1# ->
+  case shrinkMutableByteArray# maBA i# s1# of
+    s2# -> (# s2#, () #)
 
 -- | Copy some elements of a mutable array.
 copyM :: MArray s               -- ^ Destination
