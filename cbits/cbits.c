@@ -86,17 +86,17 @@ size_t _hs_text_iterN(const uint8_t *src0, size_t srcoff, size_t srclen, size_t 
   const uint8_t *src = src0 + srcoff;
   const uint8_t *srcend = src + srclen;
 
-#if defined(__x86_64__)
-  while (src < srcend - 15){
-    union { uint64_t halves[2]; __m128i whole; } w128;
-    w128.whole = _mm_loadu_si128 ((__m128i *)src);
-    w128.whole = _mm_andnot_si128(_mm_andnot_si128(_mm_slli_epi16(w128.whole, 1), w128.whole), _mm_set1_epi8(0x80U));
-    size_t leads = __builtin_popcountll(w128.halves[0]) + __builtin_popcountll(w128.halves[1]);
-    if (cnt < leads) break;
-    src+= 16;
-    cnt-= leads;
-  }
-#endif
+// #if defined(__x86_64__)
+//   while (src < srcend - 15){
+//     union { uint64_t halves[2]; __m128i whole; } w128;
+//     w128.whole = _mm_loadu_si128 ((__m128i *)src);
+//     w128.whole = _mm_andnot_si128(_mm_andnot_si128(_mm_slli_epi16(w128.whole, 1), w128.whole), _mm_set1_epi8(0x80U));
+//     size_t leads = __builtin_popcountll(w128.halves[0]) + __builtin_popcountll(w128.halves[1]);
+//     if (cnt < leads) break;
+//     src+= 16;
+//     cnt-= leads;
+//   }
+// #endif
 
   while (src < srcend - 7){
     uint64_t w64;
