@@ -422,7 +422,7 @@ pack = unstream . S.map safe . S.streamList
 -- invalid scalar values.
 cons :: Char -> Text -> Text
 cons c t = unstream (S.cons (safe c) (stream t))
-{-# INLINE cons #-}
+{-# INLINE [1] cons #-}
 
 infixr 5 `cons`
 
@@ -527,10 +527,31 @@ length ::
   HasCallStack =>
 #endif
   Text -> Int
-length t = S.length (stream t)
+length (Text arr off len) = P.fromIntegral $ unsafeDupablePerformIO $
+    c_length (A.aBA arr) (P.fromIntegral off) (P.fromIntegral len)
 {-# INLINE [1] length #-}
 -- length needs to be phased after the compareN/length rules otherwise
 -- it may inline before the rules have an opportunity to fire.
+
+foreign import ccall unsafe "_hs_text_length" c_length
+    :: ByteArray# -> CSize -> CSize -> IO CSize
+
+{-# RULES
+"TEXT length/unstream -> S.length" forall t.
+    length (unstream t) = S.length t
+"TEXT length/pack -> P.length" forall t.
+    length (pack t) = P.length t
+"TEXT length/map -> length" forall f t.
+    length (map f t) = length t
+"TEXT length/replicate -> n" forall n t.
+    length (replicate n t) = n
+"TEXT length/cons -> length+1" forall c t.
+    length (cons c t) = 1 + length t
+"TEXT length/intersperse -> 2*length-1" forall c t.
+    length (intersperse c t) = max 0 (2 P.* length t - 1)
+"TEXT length/intercalate -> n*length" forall s ts.
+    length (intercalate s ts) = let lenS = length s in max 0 (P.sum (P.map (\t -> length t + lenS) ts) - lenS)
+  #-}
 
 -- | /O(n)/ Compare the count of characters in a 'Text' to a number.
 --
@@ -602,7 +623,7 @@ map f t = unstream (S.map (safe . f) (stream t))
 -- "WeNI!seekNI!theNI!HolyNI!Grail"
 intercalate :: Text -> [Text] -> Text
 intercalate t = concat . (F.intersperse t)
-{-# INLINE intercalate #-}
+{-# INLINE [1] intercalate #-}
 
 -- | /O(n)/ The 'intersperse' function takes a character and places it
 -- between the characters of a 'Text'.
@@ -615,7 +636,7 @@ intercalate t = concat . (F.intersperse t)
 -- Performs replacement on invalid scalar values.
 intersperse     :: Char -> Text -> Text
 intersperse c t = unstream (S.intersperse (safe c) (stream t))
-{-# INLINE intersperse #-}
+{-# INLINE [1] intersperse #-}
 
 -- | /O(n)/ Reverse the characters of a string.
 --
