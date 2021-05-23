@@ -4,6 +4,7 @@ on:
     branches:
       - master
       - utf8
+      - utf8-win
   pull_request: {}
 
 defaults:
