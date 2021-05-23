@@ -177,7 +177,6 @@ test-suite tests
   hs-source-dirs: tests
   main-is:        Tests.hs
   other-modules:
-    Tests.Lift
     Tests.Properties
     Tests.Properties.Basics
     Tests.Properties.Builder
@@ -192,6 +191,9 @@ test-suite tests
     Tests.Regressions
     Tests.SlowFunctions
     Tests.Utils
+  if !os(windows)
+    other-modules:
+      Tests.Lift
 
   -- Fusion tests fail in developer mode (because asserts break inlining)
   -- and take ages to build.
