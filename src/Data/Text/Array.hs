@@ -47,10 +47,8 @@ module Data.Text.Array
 
 #if defined(ASSERTS)
 -- TODO employ resizeMutableByteArray# instead of cropping Text
-import Control.Exception (assert)
 import GHC.Stack (HasCallStack)
 #endif
-import Control.Monad.ST.Unsafe (unsafeIOToST)
 import Data.Bits ((.&.), xor, shiftR)
 import Data.Text.Internal.Unsafe (inlinePerformIO)
 import Foreign.C.Types (CInt(CInt), CSize(CSize))
@@ -239,18 +237,24 @@ copyM :: MArray s               -- ^ Destination
       -> Int                    -- ^ Source offset
       -> Int                    -- ^ Count
       -> ST s ()
-copyM dest didx src sidx count
-    | count <= 0 = return ()
-    | otherwise = do
+copyM (MArray dst) (I# dstOff) (MArray src) (I# srcOff) (I# count)
 #if defined(ASSERTS)
-    srcLen  <- getSizeofMArray src
-    destLen <- getSizeofMArray dest
-    assert (sidx + count <= srcLen) .
-      assert (didx + count <= destLen) .
+  | I# count < 0 = error $
+    "copyM: count must be >= 0, but got " ++ show (I# count)
 #endif
-      unsafeIOToST $ memcpyM (maBA dest) (intToCSize didx)
-                             (maBA src) (intToCSize sidx)
-                             (intToCSize count)
+  | otherwise = do
+#if defined(ASSERTS)
+    srcLen <- getSizeofMArray (MArray src)
+    dstLen <- getSizeofMArray (MArray dst)
+    if I# srcOff + I# count > srcLen
+      then error "copyM: source is too short"
+      else return ()
+    if I# dstOff + I# count > dstLen
+      then error "copyM: destination is too short"
+      else return ()
+#endif
+    ST $ \s1# -> case copyMutableByteArray# src srcOff dst dstOff count s1# of
+      s2# -> (# s2#, () #)
 {-# INLINE copyM #-}
 
 -- | Copy some elements of an immutable array.
@@ -261,12 +265,14 @@ copyI :: MArray s               -- ^ Destination
       -> Int                    -- ^ First offset in destination /not/ to
                                 -- copy (i.e. /not/ length)
       -> ST s ()
-copyI dest i0 src j0 top
-    | i0 >= top = return ()
-    | otherwise = unsafeIOToST $
-                  memcpyI (maBA dest) (intToCSize i0)
-                          (aBA src) (intToCSize j0)
-                          (intToCSize (top-i0))
+copyI (MArray dst) (I# dstOff) (Array src) (I# srcOff) (I# top)
+#if defined(ASSERTS)
+  | I# top < I# dstOff = error $
+    "copyI: top must be >= dstOff, but " ++ show (I# top) ++ " < " ++ show (I# dstOff)
+#endif
+  | otherwise = ST $ \s1# ->
+    case copyByteArray# src srcOff dst dstOff (top -# dstOff) s1# of
+      s2# -> (# s2#, () #)
 {-# INLINE copyI #-}
 
 -- | Compare portions of two arrays for equality.  No bounds checking
@@ -286,12 +292,5 @@ equal arrA offA arrB offB count = inlinePerformIO $ do
 intToCSize :: Int -> CSize
 intToCSize = fromIntegral
 
-foreign import ccall unsafe "_hs_text_memcpy" memcpyI
-    :: MutableByteArray# s -> CSize -> ByteArray# -> CSize -> CSize -> IO ()
-
 foreign import ccall unsafe "_hs_text_memcmp" memcmp
     :: ByteArray# -> CSize -> ByteArray# -> CSize -> CSize -> IO CInt
-
-foreign import ccall unsafe "_hs_text_memcpy" memcpyM
-    :: MutableByteArray# s -> CSize -> MutableByteArray# s -> CSize -> CSize
-    -> IO ()
