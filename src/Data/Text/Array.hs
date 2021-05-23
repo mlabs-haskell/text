@@ -49,7 +49,6 @@ module Data.Text.Array
 -- TODO employ resizeMutableByteArray# instead of cropping Text
 import GHC.Stack (HasCallStack)
 #endif
-import Data.Bits ((.&.), xor, shiftR)
 import Data.Text.Internal.Unsafe (inlinePerformIO)
 import Foreign.C.Types (CInt(CInt), CSize(CSize))
 import GHC.Exts hiding (toList)
@@ -72,17 +71,14 @@ data MArray s = MArray { maBA :: MutableByteArray# s }
 
 -- | Create an uninitialized mutable array.
 new :: forall s. Int -> ST s (MArray s)
-new n
-  | n < 0 || n .&. highBit /= 0 = array_size_error
+new (I# len#)
+#if defined(ASSERTS)
+  | I# len < 0 = error "Data.Text.Array.new: size overflow"
+#endif
   | otherwise = ST $ \s1# ->
-       case newByteArray# len# s1# of
-         (# s2#, marr# #) -> (# s2#, MArray marr# #)
-  where !(I# len#) = bytesInArray n
-        highBit    = maxBound `xor` (maxBound `shiftR` 1)
+    case newByteArray# len# s1# of
+      (# s2#, marr# #) -> (# s2#, MArray marr# #)
 {-# INLINE new #-}
-
-array_size_error :: a
-array_size_error = error "Data.Text.Array.new: size overflow"
 
 -- | Freeze a mutable array. Do not mutate the 'MArray' afterwards!
 unsafeFreeze :: MArray s -> ST s Array
@@ -90,12 +86,6 @@ unsafeFreeze MArray{..} = ST $ \s1# ->
     case unsafeFreezeByteArray# maBA s1# of
         (# s2#, ba# #) -> (# s2#, Array ba# #)
 {-# INLINE unsafeFreeze #-}
-
--- | Indicate how many bytes would be used for an array of the given
--- size.
-bytesInArray :: Int -> Int
-bytesInArray n = n
-{-# INLINE bytesInArray #-}
 
 -- | Unchecked read of an immutable array.  May return garbage or
 -- crash on an out-of-bounds access.
