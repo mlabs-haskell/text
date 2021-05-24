@@ -78,7 +78,7 @@ import Foreign.C.Types (CSize)
 import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (Ptr, minusPtr, nullPtr, plusPtr)
 import Foreign.Storable (Storable, peek, poke)
-import GHC.Base (MutableByteArray#)
+import GHC.Base (MutableByteArray#, sizeofByteArray#, Int (I#))
 import qualified Data.ByteString.Builder as B
 import qualified Data.ByteString.Builder.Internal as B hiding (empty, append)
 import qualified Data.ByteString.Builder.Prim as BP
@@ -110,7 +110,8 @@ import GHC.Stack (HasCallStack)
 -- | /Deprecated/.  Decode a 'ByteString' containing 7-bit ASCII
 -- encoded text.
 decodeASCII :: ByteString -> Text
-decodeASCII = decodeUtf8
+decodeASCII bs = let !(SBS.SBS arr) = SBS.toShort bs in
+  Text (A.Array arr) 0 (I# (sizeofByteArray# arr))
 {-# DEPRECATED decodeASCII "Use decodeUtf8 instead" #-}
 
 -- | Decode a 'ByteString' containing Latin-1 (aka ISO-8859-1) encoded text.
