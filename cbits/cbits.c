@@ -56,23 +56,46 @@ decode(uint32_t *state, uint32_t* codep, uint32_t byte) {
 }
 
 size_t
-_hs_text_decode_latin1(uint8_t *dest, const uint8_t *src,
+_hs_text_decode_latin1(uint8_t *dst0, const uint8_t *src0,
                        const uint8_t *srcend)
 {
-  const uint8_t *dest0 = dest;
-  const uint8_t *p = src;
+  uint8_t *dst = dst0;
+  const uint8_t *src = src0;
 
-  while (p != srcend){
-    uint8_t codepoint = *p++;
+  while (src < srcend){
+
+#if defined(__x86_64__)
+    while (src < srcend - 15){
+      __m128i w128;
+      w128 = _mm_loadu_si128 ((__m128i *)src);
+      if (_mm_movemask_epi8(w128)) break;
+      memcpy(dst, &w128, sizeof(__m128i));
+      dst+= 16;
+      src+= 16;
+    }
+#endif
+
+    while (src < srcend - 7){
+      uint64_t w64;
+      memcpy(&w64, src, sizeof(uint64_t));
+      if (w64 & 0x8080808080808080ULL) break;
+      memcpy(dst, &w64, sizeof(uint64_t));
+      dst+= 8;
+      src+= 8;
+    }
+
+    if(src >= srcend) break;
+
+    uint8_t codepoint = *src++;
     if(codepoint < 0x80){
-      *dest++ = (uint8_t)codepoint;
+      *dst++ = (uint8_t)codepoint;
     } else {
-      *dest++ = (uint8_t) (0xC0 + (codepoint >> 6));
-      *dest++ = (uint8_t) (0x80 + (codepoint & 0x3F));
+      *dst++ = (uint8_t) (0xC0 + (codepoint >> 6));
+      *dst++ = (uint8_t) (0x80 + (codepoint & 0x3F));
     }
   }
 
-  return (dest - dest0);
+  return (dst - dst0);
 }
 
 size_t _hs_text_iterN(const uint8_t *src0, size_t srcoff, size_t srclen, size_t cnt)
