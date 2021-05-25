@@ -4,14 +4,14 @@ build-type:     Simple
 version:        0.0
 
 library
-  c-sources:    cbits/cbits.c
-  hs-source-dirs: src
+  c-sources:    cbits.c
+  hs-source-dirs: .
 
   exposed-modules:
     Data.Text
     Data.TextLift
 
   build-depends:
-    base             >= 4.9 && < 5,
-    template-haskell >= 2.5 && < 2.19
+    base,
+    template-haskell
   default-language: Haskell2010

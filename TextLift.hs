@@ -1,8 +1,8 @@
 {-# LANGUAGE TemplateHaskell #-}
 
-module Data.TextLift (foo) where
+module TextLift (foo) where
 
-import Data.Text
+import Text
 import Language.Haskell.TH.Syntax (lift)
 
 foo :: Text
