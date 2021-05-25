@@ -1,4 +1,4 @@
-cabal-version:  >= 1.10
+cabal-version:  2.2
 name:           text
 version:        1.2.4.2
 
@@ -49,7 +49,7 @@ description:
     <https://hackage.haskell.org/package/text-short text-short>.
 
 
-license:        BSD2
+license:        BSD-2-Clause
 license-file:   LICENSE
 author:         Bryan O'Sullivan <bos@serpentine.com>
 maintainer:     Haskell Text Team <andrew.lelechenko@gmail.com>, Core Libraries Committee
@@ -75,9 +75,17 @@ flag developer
   manual: True
 
 library
-  c-sources:    cbits/cbits.c
+  cxx-sources:  cbits/cbits.c
+                cbits/simdjson.cpp
+                cbits/validate_utf8.cpp
   include-dirs: include
   hs-source-dirs: src
+  cxx-options: -std=c++17
+
+  if os(darwin)
+    extra-libraries: c++
+  else
+    extra-libraries: stdc++
 
   exposed-modules:
     Data.Text
@@ -179,7 +187,7 @@ source-repository head
 test-suite tests
   type:           exitcode-stdio-1.0
   ghc-options:
-    -Wall -threaded -rtsopts
+    -Wall -threaded -rtsopts -Wno-missed-extra-shared-lib
 
   hs-source-dirs: tests
   main-is:        Tests.hs
