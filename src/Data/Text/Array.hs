@@ -1,5 +1,5 @@
 {-# LANGUAGE BangPatterns, CPP, MagicHash, Rank2Types,
-    RecordWildCards, UnboxedTuples, UnliftedFFITypes #-}
+    RecordWildCards, UnboxedTuples #-}
 {-# OPTIONS_GHC -fno-warn-unused-matches #-}
 -- |
 -- Module      : Data.Text.Array
@@ -45,13 +45,11 @@ import Control.Exception (assert)
 import GHC.Base (sizeofByteArray#, getSizeofMutableByteArray#)
 import GHC.Stack (HasCallStack)
 #endif
-import Control.Monad.ST.Unsafe (unsafeIOToST)
 import Data.Bits ((.&.), xor, shiftL, shiftR)
-import Data.Text.Internal.Unsafe (inlinePerformIO)
-import Foreign.C.Types (CInt(CInt), CSize(CSize))
 import GHC.Base (ByteArray#, MutableByteArray#, Int(..),
                  indexWord16Array#, newByteArray#,
-                 unsafeFreezeByteArray#, writeWord16Array#)
+                 unsafeFreezeByteArray#, writeWord16Array#,
+                 compareByteArrays#, (-#), copyByteArray#, copyMutableByteArray#)
 import GHC.ST (ST(..), runST)
 import GHC.Word (Word16(..))
 import Prelude hiding (length, read)
@@ -172,18 +170,17 @@ copyM :: MArray s               -- ^ Destination
       -> Int                    -- ^ Source offset
       -> Int                    -- ^ Count
       -> ST s ()
-copyM dest didx src sidx count
-    | count <= 0 = return ()
+copyM dst@(MArray dst#) dstOff@(I# dstOff#) src@(MArray src#) srcOff@(I# srcOff#) count@(I# count#)
+    | I# count# <= 0 = return ()
     | otherwise = do
 #if defined(ASSERTS)
-    srcLen  <- getSizeofMArray src
-    destLen <- getSizeofMArray dest
-    assert (sidx + count <= srcLen `quot` 2) .
-      assert (didx + count <= destLen `quot` 2) .
+    srcLen <- getSizeofMArray src
+    dstLen <- getSizeofMArray dst
+    assert (srcOff + count <= srcLen `quot` 2) .
+      assert (dstOff + count <= dstLen `quot` 2) .
 #endif
-      unsafeIOToST $ memcpyM (maBA dest) (intToCSize didx)
-                             (maBA src) (intToCSize sidx)
-                             (intToCSize count)
+      ST $ \s1# -> case copyMutableByteArray# src# srcOff# dst# dstOff# count# s1# of
+        s2# -> (# s2#, () #)
 {-# INLINE copyM #-}
 
 -- | Copy some elements of an immutable array.
@@ -194,12 +191,11 @@ copyI :: MArray s               -- ^ Destination
       -> Int                    -- ^ First offset in destination /not/ to
                                 -- copy (i.e. /not/ length)
       -> ST s ()
-copyI dest i0 src j0 top
-    | i0 >= top = return ()
-    | otherwise = unsafeIOToST $
-                  memcpyI (maBA dest) (intToCSize i0)
-                          (aBA src) (intToCSize j0)
-                          (intToCSize (top-i0))
+copyI (MArray dst#) dstOff@(I# dstOff#) (Array src#) (I# srcOff#) top@(I# top#)
+    | dstOff >= top = return ()
+    | otherwise = ST $ \s1# ->
+      case copyByteArray# src# srcOff# dst# dstOff# (top# -# dstOff#) s1# of
+        s2# -> (# s2#, () #)
 {-# INLINE copyI #-}
 
 -- | Compare portions of two arrays for equality.  No bounds checking
@@ -210,21 +206,7 @@ equal :: Array                  -- ^ First
       -> Int                    -- ^ Offset into second
       -> Int                    -- ^ Count
       -> Bool
-equal arrA offA arrB offB count = inlinePerformIO $ do
-  i <- memcmp (aBA arrA) (intToCSize offA)
-                     (aBA arrB) (intToCSize offB) (intToCSize count)
-  return $! i == 0
+equal (Array src1#) (I# off1#) (Array src2#) (I# off2#) (I# count#) = i == 0
+  where
+    i = I# (compareByteArrays# src1# off1# src2# off2# count#)
 {-# INLINE equal #-}
-
-intToCSize :: Int -> CSize
-intToCSize = fromIntegral
-
-foreign import ccall unsafe "_hs_text_memcpy" memcpyI
-    :: MutableByteArray# s -> CSize -> ByteArray# -> CSize -> CSize -> IO ()
-
-foreign import ccall unsafe "_hs_text_memcmp" memcmp
-    :: ByteArray# -> CSize -> ByteArray# -> CSize -> CSize -> IO CInt
-
-foreign import ccall unsafe "_hs_text_memcpy" memcpyM
-    :: MutableByteArray# s -> CSize -> MutableByteArray# s -> CSize -> CSize
-    -> IO ()
