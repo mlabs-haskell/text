@@ -19,6 +19,7 @@ library
 
   exposed-modules:
     Data.Text
+    Data.TextLift
 
   build-depends:
     base             >= 4.9 && < 5,
