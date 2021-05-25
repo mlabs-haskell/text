@@ -6,6 +6,7 @@
 
 module Data.Text
     ( Text(..)
+    , c_iterN
     ) where
 
 import Language.Haskell.TH.Syntax
