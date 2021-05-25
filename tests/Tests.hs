@@ -1,27 +1,14 @@
-{-# LANGUAGE CPP #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
 
-module Main
-    ( main
-    ) where
-
-import Test.Tasty (defaultMain, testGroup)
-
-import qualified Tests.Lift as Lift
-import qualified Tests.Properties as Properties
-import qualified Tests.Regressions as Regressions
-
-#if !defined(ASSERTS)
-import qualified Tests.Inspection.Strict as InspectionStrict
-import qualified Tests.Inspection.Lazy   as InspectionLazy
-#endif
+import qualified Data.Text as S
+import Language.Haskell.TH.Syntax (lift)
+import Test.Tasty (TestTree, defaultMain, testGroup)
+import Test.Tasty.HUnit (testCase, assertEqual)
 
 main :: IO ()
-main = defaultMain $ testGroup "All"
-  [ Lift.tests
-  , Properties.tests
-  , Regressions.tests
-#if !defined(ASSERTS)
-  , InspectionStrict.tests
-  , InspectionLazy.tests
-#endif
+main = defaultMain $ testGroup "TH lifting Text"
+  [ testCase "strict" $ assertEqual "strict"
+      $(lift ("foo" :: S.Text))
+      ("foo" :: S.Text)
   ]
