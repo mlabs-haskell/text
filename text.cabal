@@ -1,20 +1,10 @@
 cabal-version:  >= 1.10
-name:           text
-version:        1.2.4.2
-
-homepage:       https://github.com/haskell/text
-bug-reports:    https://github.com/haskell/text/issues
-license:        BSD2
-license-file:   LICENSE
-author:         Bryan O'Sullivan <bos@serpentine.com>
-maintainer:     Haskell Text Team <andrew.lelechenko@gmail.com>, Core Libraries Committee
-copyright:      2009-2011 Bryan O'Sullivan, 2008-2009 Tom Harper
-category:       Data, Text
+name:           linking-issue
 build-type:     Simple
+version:        0.0
 
 library
   c-sources:    cbits/cbits.c
-  include-dirs: include
   hs-source-dirs: src
 
   exposed-modules:
@@ -24,18 +14,4 @@ library
   build-depends:
     base             >= 4.9 && < 5,
     template-haskell >= 2.5 && < 2.19
-  default-language: Haskell2010
-
-test-suite tests
-  type:           exitcode-stdio-1.0
-  hs-source-dirs: tests
-  main-is:        Tests.hs
-
-  build-depends:
-    base <5,
-    tasty,
-    tasty-hunit,
-    template-haskell,
-    text
-
   default-language: Haskell2010

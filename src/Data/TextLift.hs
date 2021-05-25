@@ -6,4 +6,4 @@ import Data.Text
 import Language.Haskell.TH.Syntax (lift)
 
 foo :: Text
-foo = $(lift (Text "foo" :: Text))
+foo = $(lift (Text "foo"))

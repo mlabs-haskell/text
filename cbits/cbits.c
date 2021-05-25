@@ -14,8 +14,6 @@
 #include <xmmintrin.h>
 #endif
 
-#include "text_cbits.h"
-
 int _hs_text_memcmp(const void *a, size_t aoff, const void *b, size_t boff,
 		    size_t n)
 {
