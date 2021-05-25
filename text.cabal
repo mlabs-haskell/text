@@ -8,8 +8,8 @@ library
   hs-source-dirs: .
 
   exposed-modules:
-    Data.Text
-    Data.TextLift
+    Text
+    TextLift
 
   build-depends:
     base,
