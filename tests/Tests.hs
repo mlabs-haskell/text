@@ -1,4 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 import qualified Data.Text as S
@@ -9,6 +8,6 @@ import Test.Tasty.HUnit (testCase, assertEqual)
 main :: IO ()
 main = defaultMain $ testGroup "TH lifting Text"
   [ testCase "strict" $ assertEqual "strict"
-      $(lift ("foo" :: S.Text))
-      ("foo" :: S.Text)
+      $(lift (S.Text "foo" :: S.Text))
+      (S.Text "foo" :: S.Text)
   ]
