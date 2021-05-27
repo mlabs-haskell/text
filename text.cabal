@@ -137,6 +137,9 @@ library
     ghc-prim         >= 0.2 && < 0.9,
     template-haskell >= 2.5 && < 2.19
 
+  if impl(ghc < 8.4)
+    build-depends:  ghc-byteorder
+
   ghc-options: -Wall -fwarn-tabs -funbox-strict-fields -O2
   if flag(developer)
     ghc-options: -fno-ignore-asserts
