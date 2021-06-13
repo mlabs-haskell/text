@@ -1,0 +1,57 @@
+clone_folder: "c:\\WORK"
+clone_depth: 5
+
+# Do not build feature branch with open Pull Requests
+skip_branch_with_pr: true
+
+platform:
+  - x86_64
+  - x86
+
+environment:
+  global:
+    CABOPTS:  --http-transport=plain-http
+    CHOCOCMD: ghc --version %GHCVER%
+  matrix:
+    - GHCVER: 9.0.1
+    - GHCVER: 8.10.4
+    - GHCVER: 8.8.4
+    - GHCVER: 8.6.5
+    - GHCVER: 8.4.2
+    - GHCVER: 8.2.2
+    - GHCVER: 8.0.2
+
+matrix:
+  # set this flag to immediately finish build once one of the jobs fails.
+  fast_finish: true
+  exclude:
+    - platform: x86
+      GHCVER: 8.8.4
+    - platform: x86
+      GHCVER: 8.10.4
+    - platform: x86
+      GHCVER: 9.0.1
+
+for:
+  -
+    matrix:
+      only:
+        - platform: x86
+    environment:
+      global:
+        CHOCO_OPTS: --forcex86
+
+install:
+ - choco source add -n mistuke -s https://www.myget.org/F/mistuke/api/v2
+ - choco install %CHOCOCMD% -y %GHC_OPTS% %CHOCO_OPTS% --ignore-dependencies
+ - choco install -y cabal %CHOCO_OPTS%
+ - refreshenv
+
+before_build:
+ - cabal --version
+ - ghc --version
+ - cabal %CABOPTS% update
+ - rmdir /Q /S dist-newstyle
+
+build_script:
+ - cabal %CABOPTS% test --test-show-details=direct
