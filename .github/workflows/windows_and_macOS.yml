@@ -32,9 +32,9 @@ jobs:
     # https://github.com/haskell/actions/issues/36
     - name: Test
       run: |
-        bld() { cabal build pkg:text:tests; }
+        bld() { cabal build -v3 pkg:text:tests; }
         bld || bld || bld
-        cabal test
+        cabal test -v3
     - name: Haddock
       run: cabal haddock
     - name: SDist
