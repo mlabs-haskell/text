@@ -82,10 +82,16 @@ library
   hs-source-dirs: src
   cxx-options: -std=c++17
 
-  if os(darwin)
-    extra-libraries: c++
+  if os(windows)
+    if arch(x86_64)
+      extra-libraries: stdc++-6 gcc_s_seh-1
+    else
+      extra-libraries: stdc++-6 gcc_s_dw2-1
   else
-    extra-libraries: stdc++
+    if os(darwin)
+      extra-libraries: c++
+    else
+      extra-libraries: stdc++
 
   exposed-modules:
     Data.Text
