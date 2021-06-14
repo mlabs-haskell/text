@@ -12,7 +12,6 @@ import Data.Text.Foreign
 import Data.Text.Internal (mul, mul32, mul64)
 import Data.Word (Word8, Word16, Word32)
 import System.IO.Unsafe (unsafePerformIO)
-import Test.QuickCheck.Monadic
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.QuickCheck (testProperty)
 import Test.QuickCheck hiding ((.&.))
@@ -51,7 +50,7 @@ t_dropWord8 m t = dropWord8 m t `T.isSuffixOf` t
 t_takeWord8 m t = takeWord8 m t `T.isPrefixOf` t
 t_take_drop_8 m t = T.append (takeWord8 n t) (dropWord8 n t) === t
   where n = small m
-t_use_from t = monadicIO $ assert . (==t) =<< run (useAsPtr t fromPtr)
+t_use_from t = ioProperty $ (==t) <$> useAsPtr t fromPtr
 
 t_copy t = T.copy t === t
 
