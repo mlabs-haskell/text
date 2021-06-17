@@ -74,7 +74,7 @@ import Data.Text.Internal.Unsafe.Char (unsafeWrite)
 import Data.Text.Show ()
 import Data.Text.Unsafe (unsafeDupablePerformIO)
 import Data.Word (Word8, Word32)
-import Foreign.C.Types (CSize(..))
+import Foreign.C.Types (CSize(..), CInt(..))
 import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (Ptr, minusPtr, nullPtr, plusPtr)
 import Foreign.Storable (Storable, peek, poke)
@@ -546,4 +546,4 @@ foreign import ccall unsafe "_hs_text_decode_latin1" c_decode_latin1
     :: MutableByteArray# s -> Ptr Word8 -> Ptr Word8 -> IO Int
 
 foreign import ccall unsafe "_hs_text_is_valid_utf8" c_is_valid_utf8
-    :: Ptr Word8 -> CSize -> IO Int
+    :: Ptr Word8 -> CSize -> IO CInt
