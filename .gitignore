@@ -12,3 +12,6 @@
 
 # Test data repo ignored. Please see instruction in tests-and-benchmarks.markdown
 /benchmarks/text-test-data/
+
+.nvimrc
+baseline-*

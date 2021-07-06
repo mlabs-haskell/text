@@ -76,24 +76,13 @@ flag developer
 
 library
   c-sources:    cbits/cbits.c
+                cbits/find-invalid-utf8.c
                 cbits/length.c
                 cbits/reverse.c
-  cxx-sources:  cbits/simdjson.cpp
-                cbits/validate_utf8.cpp
   include-dirs: include
+  cc-options: -O2
   hs-source-dirs: src
-  cxx-options: -std=c++17
 
-  if os(windows)
-    if arch(x86_64)
-      extra-libraries: stdc++-6 gcc_s_seh-1
-    else
-      extra-libraries: stdc++-6 gcc_s_dw2-1
-  else
-    if os(darwin)
-      extra-libraries: c++
-    else
-      extra-libraries: stdc++
 
   exposed-modules:
     Data.Text
