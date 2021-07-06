@@ -74,7 +74,7 @@ import Data.Text.Internal.Unsafe.Char (unsafeWrite)
 import Data.Text.Show ()
 import Data.Text.Unsafe (unsafeDupablePerformIO)
 import Data.Word (Word8, Word32)
-import Foreign.C.Types (CSize(..), CInt(..), CPtrdiff(CPtrdiff))
+import Foreign.C.Types (CSize(..), CPtrdiff(CPtrdiff))
 import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (Ptr, minusPtr, nullPtr, plusPtr)
 import Foreign.Storable (Storable, peek, poke)
@@ -132,15 +132,6 @@ decodeLatin1 bs = withBS bs aux where
       destLen <- c_decode_latin1 (A.maBA dest) src (src `plusPtr` len)
       return (dest, destLen)
 
-{-
-isValidBS :: ByteString -> Bool
-isValidBS bs = withBS bs aux
- where
-  aux fp len = unsafeDupablePerformIO $ unsafeWithForeignPtr fp $ \ptr -> do
-    ret <- c_is_valid_utf8 ptr (fromIntegral len)
-    pure $ ret /= 0
--}
-
 -- | Decode a 'ByteString' containing UTF-8 encoded text.
 --
 -- __NOTE__: The replacement character returned by 'OnDecodeError'
@@ -154,13 +145,17 @@ decodeUtf8With ::
   HasCallStack =>
 #endif
   OnDecodeError -> ByteString -> Text
-decodeUtf8With onErr bs@(B.PS ptr off len) = 
-  unsafeDupablePerformIO . unsafeWithForeignPtr ptr $ \ptr' -> do
-    CPtrdiff res <- findInvalidUtf8# ptr' (fromIntegral off) (fromIntegral len)
-    pure $ case res of 
-      (-1) -> decodeASCII bs -- We didn't find anything fishy.
-      _ -> withBS bs aux -- We found something awry.
+decodeUtf8With onErr bs = 
+  let (CPtrdiff res) = withBS bs validate in
+    case res of 
+      (-1) -> decodeASCII bs
+      _ -> withBS bs aux
  where
+  validate :: ForeignPtr Word8 -> Int -> CPtrdiff
+  validate fp len = 
+    unsafeDupablePerformIO . 
+    unsafeWithForeignPtr fp $ 
+    \ptr -> findInvalidUtf8# ptr (fromIntegral len)
   -- I've left this as-is, though we could do this more efficiently now. - Koz
   aux fp len = runText $ \done -> do
     let go dest = unsafeWithForeignPtr fp $ \ptr ->
@@ -546,7 +541,7 @@ intToCSize :: Int -> CSize
 intToCSize = fromIntegral
 
 foreign import ccall unsafe "find_invalid_utf8" findInvalidUtf8#
-  :: Ptr Word8 -> CSize -> CSize -> IO CPtrdiff
+  :: Ptr Word8 -> CSize -> IO CPtrdiff
 
 foreign import ccall unsafe "_hs_text_decode_utf8" c_decode_utf8
     :: MutableByteArray# s -> Ptr CSize

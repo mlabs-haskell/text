@@ -8,9 +8,8 @@ static inline uint64_t broadcast (uint8_t const byte) {
 }
 
 static inline bool is_ascii (uint8_t const * const src,
-                             size_t off,
-                             size_t len) {
-  uint8_t const * ptr = (uint8_t const *)&(src[off]);
+                             size_t const len) {
+  uint8_t const * ptr = (uint8_t const *)src;
   // We step four 64-bit words at a time.
   size_t const big_strides = len / 32;
   size_t const small_strides = len % 32;
@@ -46,12 +45,11 @@ static inline bool is_ascii (uint8_t const * const src,
 // Returns an index into src where the invalid UTF-8 sequence started, or -1 if
 // no such sequence was found.
 ptrdiff_t find_invalid_utf8 (uint8_t const * const src,
-                             size_t off,
-                             size_t len) {
-  if (is_ascii(src, off, len)) {
+                             size_t const len) {
+  if (is_ascii(src, len)) {
     return -1;
   }
-  uint8_t const * ptr = (uint8_t const *)&(src[off]);
+  uint8_t const * ptr = (uint8_t const *)src;
   // This is 'one past the end' to make loop termination and bounds checks
   // easier.
   uint8_t const * const end = ptr + len;
@@ -62,15 +60,18 @@ ptrdiff_t find_invalid_utf8 (uint8_t const * const src,
       ptr++;
     }
     // Check for a valid 2-byte sequence.
+    //
+    // We use a signed comparison to avoid an extra comparison with 0x80, since
+    // _signed_ 0x80 is -128.
     else if (ptr + 1 < end && byte >= 0xC2 && byte <= 0xDF &&
-             (*(ptr + 1)) <= 0xBF) {
+             ((int8_t)*(ptr + 1)) <= (int8_t)0xBF) {
       ptr += 2;
     }
     // Check for a valid 3-byte sequence.
     else if (ptr + 2 < end) {
       uint8_t const byte2 = *(ptr + 1);
-      bool byte2_valid = byte2 <= 0xBF;
-      bool byte3_valid = (*(ptr + 2)) <= 0xBF;
+      bool byte2_valid = (int8_t)byte2 <= (int8_t)0xBF;
+      bool byte3_valid = ((int8_t)*(ptr + 2)) <= (int8_t)0xBF;
       if (byte2_valid && byte3_valid && 
           // E0, A0..BF, 80..BF
           ((byte == 0xE0 && byte2 >= 0xA0) ||
@@ -89,9 +90,9 @@ ptrdiff_t find_invalid_utf8 (uint8_t const * const src,
     // Check for a valid 4-byte sequence
     else if (ptr + 3 < end) {
       uint8_t const byte2 = *(ptr + 1);
-      bool byte2_valid = byte2 <= 0xBF;
-      bool byte3_valid = (*(ptr + 2)) <= 0xBF;
-      bool byte4_valid = (*(ptr + 3)) <= 0xBF;
+      bool byte2_valid = (int8_t)byte2 <= (int8_t)0xBF;
+      bool byte3_valid = ((int8_t)*(ptr + 2)) <= (int8_t)0xBF;
+      bool byte4_valid = ((int8_t)*(ptr + 3)) <= (int8_t)0xBF;
       if (byte2_valid && byte3_valid && byte4_valid &&
           // F0, 90..BF, 80..BF, 80..BF
           ((byte == 0xF0 && byte2 >= 0x90) ||

@@ -75,10 +75,17 @@ flag developer
   manual: True
 
 library
-  c-sources:    cbits/cbits.c
-                cbits/find-invalid-utf8.c
-                cbits/length.c
-                cbits/reverse.c
+  if (arch(x86_64) || arch(i386))
+    c-sources:    cbits/cbits.c
+                  cbits/length.c
+                  cbits/reverse.c
+                  cbits/x86/find-invalid-utf8.c
+  else
+    c-sources:    cbits/cbits.c
+                  cbits/find-invalid-utf8.c
+                  cbits/length.c
+                  cbits/reverse.c
+
   include-dirs: include
   cc-options: -O2
   hs-source-dirs: src
