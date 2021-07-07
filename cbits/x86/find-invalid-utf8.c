@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <emmintrin.h>
 #include <smmintrin.h>
+#include <immintrin.h>
 
 static inline bool is_ascii_sse2 (uint8_t const * const src,
                                   size_t const len) {
@@ -41,6 +42,48 @@ static inline bool is_ascii_sse2 (uint8_t const * const src,
   }
   // If we made it this far, we're valid.
   return true;
+}
+
+__attribute__((target("avx,avx2")))
+static inline bool is_ascii_avx2 (uint8_t const * const src,
+                                  size_t const len) {
+  // We process 8 SIMD registers' worth of data at once.
+  // That's 32 bytes times 8 = 256.
+  size_t const big_strides = len / 256;
+  size_t const small_strides = len % 256;
+  uint8_t const * ptr = (uint8_t const *)src;
+  __m256i high_bit_masks = _mm256_set1_epi8(0x80);
+  for (size_t i = 0; i < big_strides; i++) {
+    __m256i const * big_ptr = (__m256i const *)ptr;
+    // A non-ASCII byte will have its MSB set. Given that bitwise OR preserves
+    // 1-bits, we will only have the MSB set in any lane if that lane in any of
+    // our inputs had a set MSB.
+    __m256i const results = 
+        _mm256_or_si256(_mm256_or_si256(_mm256_or_si256(_mm256_lddqu_si256(big_ptr),
+                                                        _mm256_lddqu_si256(big_ptr + 1)),
+                                        _mm256_or_si256(_mm256_lddqu_si256(big_ptr + 2),
+                                                        _mm256_lddqu_si256(big_ptr + 3))),
+                        _mm256_or_si256(_mm256_or_si256(_mm256_lddqu_si256(big_ptr + 4),
+                                                        _mm256_lddqu_si256(big_ptr + 5)),
+                                        _mm256_or_si256(_mm256_lddqu_si256(big_ptr + 6),
+                                                        _mm256_lddqu_si256(big_ptr + 7))));
+    // Check if any MSB is set. testz returns 1 if the AND of its arguments is
+    // 0, and 0 otherwise. If we AND with 0x80 in every lane, we will only get 0
+    // if there are no set MSBs anywhere.
+    if (_mm256_testz_si256(results, high_bit_masks) == 0) {
+      return false;
+    }
+    ptr += 256;
+  }
+  // Finish what's left slowly.
+  for (size_t i = 0; i < small_strides; i++) {
+    if ((*ptr) > 0x7F) {
+      return false;
+    }
+    ptr++;
+  }
+  // If we made it this far, we're valid.
+  return -1;
 }
 
 static inline ptrdiff_t find_invalid_utf8_fallback (uint8_t const * const src,
@@ -247,11 +290,197 @@ static inline ptrdiff_t find_invalid_utf8_ssse3 (uint8_t const * const src,
   return (small_ptr - src) + small_result;
 }
 
+/*
+ * Map high nibble of "First Byte" to legal character length minus 1
+ * 0x00 ~ 0xBF --> 0
+ * 0xC0 ~ 0xDF --> 1
+ * 0xE0 ~ 0xEF --> 2
+ * 0xF0 ~ 0xFF --> 3
+ */
+static int8_t const _first_len_tbl[32] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 3,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 3,
+};
+
+/* Map "First Byte" to 8-th item of range table (0xC2 ~ 0xF4) */
+static int8_t const _first_range_tbl[32] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 8, 8,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 8, 8,
+};
+
+/*
+ * Range table, map range index to min and max values
+ * Index 0    : 00 ~ 7F (First Byte, ascii)
+ * Index 1,2,3: 80 ~ BF (Second, Third, Fourth Byte)
+ * Index 4    : A0 ~ BF (Second Byte after E0)
+ * Index 5    : 80 ~ 9F (Second Byte after ED)
+ * Index 6    : 90 ~ BF (Second Byte after F0)
+ * Index 7    : 80 ~ 8F (Second Byte after F4)
+ * Index 8    : C2 ~ F4 (First Byte, non ascii)
+ * Index 9~15 : illegal: i >= 127 && i <= -128
+ */
+static int8_t const _range_min_tbl[32] = {
+    0x00, 0x80, 0x80, 0x80, 0xA0, 0x80, 0x90, 0x80,
+    0xC2, 0x7F, 0x7F, 0x7F, 0x7F, 0x7F, 0x7F, 0x7F,
+    0x00, 0x80, 0x80, 0x80, 0xA0, 0x80, 0x90, 0x80,
+    0xC2, 0x7F, 0x7F, 0x7F, 0x7F, 0x7F, 0x7F, 0x7F,
+};
+
+static int8_t const _range_max_tbl[32] = {
+    0x7F, 0xBF, 0xBF, 0xBF, 0xBF, 0x9F, 0xBF, 0x8F,
+    0xF4, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
+    0x7F, 0xBF, 0xBF, 0xBF, 0xBF, 0x9F, 0xBF, 0x8F,
+    0xF4, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
+};
+
+/*
+ * Tables for fast handling of four special First Bytes(E0,ED,F0,F4), after
+ * which the Second Byte are not 80~BF. It contains "range index adjustment".
+ * +------------+---------------+------------------+----------------+
+ * | First Byte | original range| range adjustment | adjusted range |
+ * +------------+---------------+------------------+----------------+
+ * | E0         | 2             | 2                | 4              |
+ * +------------+---------------+------------------+----------------+
+ * | ED         | 2             | 3                | 5              |
+ * +------------+---------------+------------------+----------------+
+ * | F0         | 3             | 3                | 6              |
+ * +------------+---------------+------------------+----------------+
+ * | F4         | 4             | 4                | 8              |
+ * +------------+---------------+------------------+----------------+
+ */
+/* index1 -> E0, index14 -> ED */
+static int8_t const _df_ee_tbl[32] = {
+    0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0,
+    0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0,
+};
+/* index1 -> F0, index5 -> F4 */
+static int8_t const _ef_fe_tbl[32] = {
+    0, 3, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 3, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+};
+
+__attribute__((target("avx,avx2")))
+static inline __m256i push_last_byte_of_a_to_b(__m256i const a, 
+                                               __m256i const b) {
+  return _mm256_alignr_epi8(b, _mm256_permute2x128_si256(a, b, 0x21), 15);
+}
+
+__attribute__((target("avx,avx2")))
+static inline __m256i push_last_2bytes_of_a_to_b(__m256i const a, 
+                                                 __m256i const b) {
+  return _mm256_alignr_epi8(b, _mm256_permute2x128_si256(a, b, 0x21), 14);
+}
+
+__attribute__((target("avx,avx2")))
+static inline __m256i push_last_3bytes_of_a_to_b(__m256i const a, 
+                                                 __m256i const b) {
+  return _mm256_alignr_epi8(b, _mm256_permute2x128_si256(a, b, 0x21), 13);
+}
+
+__attribute__((target("avx,avx2")))
+static inline ptrdiff_t find_invalid_utf8_avx2 (uint8_t const * const src,
+                                                size_t const len) {
+  // We don't bother unrolling this, as AVX registers are twice as wide anyway.
+  size_t const strides = len / 32;
+  size_t const remaining_len = len % 32;
+  uint8_t const * ptr = (uint8_t const *)src;
+  __m256i prev_input = _mm256_setzero_si256();
+  __m256i prev_first_len = _mm256_setzero_si256();
+  // Load our lookup tables.
+  __m256i const first_len_tbl = 
+    _mm256_loadu_si256((__m256i const *)_first_len_tbl);
+  __m256i const first_range_tbl =
+    _mm256_loadu_si256((__m256i const *)_first_range_tbl);
+  __m256i const range_min_tbl =
+    _mm256_loadu_si256((__m256i const *)_range_min_tbl);
+  __m256i const range_max_tbl =
+    _mm256_loadu_si256((__m256i const *)_range_max_tbl);
+  __m256i const df_ee_tbl =
+    _mm256_loadu_si256((__m256i const *)_df_ee_tbl);
+  __m256i const ef_fe_tbl =
+    _mm256_loadu_si256((__m256i const *)_ef_fe_tbl);
+  __m256i errors1 = _mm256_setzero_si256();
+  __m256i errors2 = _mm256_setzero_si256();
+  for (size_t i = 0; i < strides; i++) {
+    __m256i const input = _mm256_lddqu_si256((__m256i const *)ptr);
+    __m256i const high_nibbles = 
+      _mm256_and_si256(_mm256_srli_epi16(input, 4), _mm256_set1_epi8(0x0F));
+    // Look up in our tables using the high nibbles of the input.
+    __m256i first_len = _mm256_shuffle_epi8(first_len_tbl, high_nibbles);
+    __m256i range = _mm256_shuffle_epi8(first_range_tbl, high_nibbles);
+    // Second byte: set range index to first_len
+    // 0 for 00~7F, 1 for C0~DF, 2 for E0~EF, 3 for F0~FF
+    range = _mm256_or_si256(
+        range, push_last_byte_of_a_to_b(prev_first_len, first_len));
+    // Third byte: set range index to saturate_sub(first_len, 1)
+    // 0 for 00~7F, 0 for C0~DF, 1 for E0~EF, 2 for F0~FF
+    __m256i tmp1 = push_last_2bytes_of_a_to_b(prev_first_len, first_len);
+    __m256i tmp2 = _mm256_subs_epu8(tmp1, _mm256_set1_epi8(1));
+    range = _mm256_or_si256(range, tmp2);
+    // Fourth byte: set range index to saturate_sub(first_len, 2)
+    // 0 for 00~7F, 0 for C0~DF, 0 for E0~EF, 1 for F0~FF
+    tmp1 = push_last_3bytes_of_a_to_b(prev_first_len, first_len);
+    tmp2 = _mm256_subs_epu8(tmp1, _mm256_set1_epi8(2));
+    range = _mm256_or_si256(range, tmp2);
+    // Adjust second byte range for special first bytes (E0,ED,F0,F4).
+    // Overlaps lead to indices from 9 to 15, which are illegal in the range table.
+    __m256i shift1 = push_last_byte_of_a_to_b(prev_input, input);
+    __m256i pos = _mm256_sub_epi8(shift1, _mm256_set1_epi8(0xEF));
+    tmp1 = _mm256_subs_epu8(pos, _mm256_set1_epi8(240));
+    __m256i range2 = _mm256_shuffle_epi8(df_ee_tbl, tmp1);
+    tmp2 = _mm256_adds_epu8(pos, _mm256_set1_epi8(112));
+    range2 = _mm256_add_epi8(range2, _mm256_shuffle_epi8(ef_fe_tbl, tmp2));
+    range = _mm256_add_epi8(range, range2);
+    // Load our calculated min and max ranges.
+    __m256i minv = _mm256_shuffle_epi8(range_min_tbl, range);
+    __m256i maxv = _mm256_shuffle_epi8(range_max_tbl, range);
+    // Check we're in range, accumulating errors if not.
+    errors1 = _mm256_or_si256(errors1, _mm256_cmpgt_epi8(minv, input));
+    errors2 = _mm256_or_si256(errors2, _mm256_cmpgt_epi8(input, maxv));
+    // Save for next step.
+    prev_input = input;
+    prev_first_len = first_len;
+    ptr += 32;
+  }
+  // Collect our error values, then check if we have a non-zero. If we do,
+  // something went wrong and we have to find the position manually.
+  __m256i errors = _mm256_or_si256(errors1, errors2);
+  if (_mm256_testz_si256(errors, errors) != 1) {
+    return find_invalid_utf8_fallback(src, len);
+  }
+  // 'Roll back' our pointer a little to prepare for a slow search of the rest.
+  uint32_t tokens_blob = _mm256_extract_epi32(prev_input, 7);
+  int8_t const * tokens = (int8_t const *)&tokens_blob;
+  ptrdiff_t lookahead = 0;
+  if (tokens[3] > (int8_t)0xBF) {
+    lookahead = 1;
+  }
+  else if (tokens[2] > (int8_t)0xBF) {
+    lookahead = 2;
+  }
+  else if (tokens[1] > (int8_t)0xBF) {
+    lookahead = 3;
+  }
+  uint8_t const * const small_ptr = ptr - lookahead;
+  size_t const small_len = remaining_len + lookahead;
+  ptrdiff_t small_result = find_invalid_utf8_fallback(small_ptr, small_len);
+  if (small_result == -1) {
+    return -1;
+  }
+  return (small_ptr - src) + small_result;
+}
+
 // Returns an index into src where the invalid UTF-8 sequence started, or -1 if
 // no such sequence was found.
 ptrdiff_t find_invalid_utf8 (uint8_t const * const src,
                              size_t const len) {
   __builtin_cpu_init();
+  if (__builtin_cpu_supports("avx2")) {
+    if (is_ascii_avx2(src, len)) {
+      return -1;
+    }
+    return find_invalid_utf8_avx2(src, len);
+  }
   if (is_ascii_sse2(src, len)) {
     return -1;
   }
