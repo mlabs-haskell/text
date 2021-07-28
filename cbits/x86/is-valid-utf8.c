@@ -88,14 +88,14 @@ static inline bool is_ascii_avx2 (uint8_t const * const src,
     // 1-bits, we will only have the MSB set in any lane if that lane in any of
     // our inputs had a set MSB.
     __m256i const results = 
-        _mm256_or_si256(_mm256_or_si256(_mm256_or_si256(_mm256_lddqu_si256(big_ptr),
-                                                        _mm256_lddqu_si256(big_ptr + 1)),
-                                        _mm256_or_si256(_mm256_lddqu_si256(big_ptr + 2),
-                                                        _mm256_lddqu_si256(big_ptr + 3))),
-                        _mm256_or_si256(_mm256_or_si256(_mm256_lddqu_si256(big_ptr + 4),
-                                                        _mm256_lddqu_si256(big_ptr + 5)),
-                                        _mm256_or_si256(_mm256_lddqu_si256(big_ptr + 6),
-                                                        _mm256_lddqu_si256(big_ptr + 7))));
+        _mm256_or_si256(_mm256_or_si256(_mm256_or_si256(_mm256_loadu_si256(big_ptr),
+                                                        _mm256_loadu_si256(big_ptr + 1)),
+                                        _mm256_or_si256(_mm256_loadu_si256(big_ptr + 2),
+                                                        _mm256_loadu_si256(big_ptr + 3))),
+                        _mm256_or_si256(_mm256_or_si256(_mm256_loadu_si256(big_ptr + 4),
+                                                        _mm256_loadu_si256(big_ptr + 5)),
+                                        _mm256_or_si256(_mm256_loadu_si256(big_ptr + 6),
+                                                        _mm256_loadu_si256(big_ptr + 7))));
     // Check if any MSB is set. testz returns 1 if the AND of its arguments is
     // 0, and 0 otherwise. If we AND with 0x80 in every lane, we will only get 0
     // if there are no set MSBs anywhere.
@@ -401,7 +401,7 @@ static inline int check_utf8_avx2 (uint8_t const * const src,
   __m256i errors1 = _mm256_setzero_si256();
   __m256i errors2 = _mm256_setzero_si256();
   for (size_t i = 0; i < strides; i++) {
-    __m256i const input = _mm256_lddqu_si256((__m256i const *)ptr);
+    __m256i const input = _mm256_loadu_si256((__m256i const *)ptr);
     __m256i const high_nibbles = 
       _mm256_and_si256(_mm256_srli_epi16(input, 4), _mm256_set1_epi8(0x0F));
     // Look up in our tables using the high nibbles of the input.
