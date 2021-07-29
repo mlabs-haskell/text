@@ -79,7 +79,7 @@ library
     c-sources:    cbits/cbits.c
                   cbits/length.c
                   cbits/reverse.c
-                  cbits/is-valid-utf8.c
+                  cbits/x86/is-valid-utf8.c
   else
     c-sources:    cbits/cbits.c
                   cbits/is-valid-utf8.c
