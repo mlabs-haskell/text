@@ -20,25 +20,40 @@ int is_valid_utf8 (uint8_t const * const src,
       // likely we'll see more.
       bool is_not_whitespace = byte > 32;
       // If possible, do a block-check ahead.
-      if ((ptr + 16 < end) && is_not_whitespace) {
+      if ((ptr + 32 < end) && is_not_whitespace) {
         uint64_t const * big_ptr = (uint64_t const *)ptr;
         // Non-ASCII bytes have a set MSB. Thus, if we AND with 0x80 in every
         // 'lane', we will get 0 if everything is ASCII, and something else
         // otherwise.
-        uint64_t result = (*big_ptr) & high_bits_mask;
-        if (result == 0) {
+        uint64_t results[4] = {
+          (*big_ptr) & high_bits_mask,
+          (*(big_ptr + 1)) & high_bits_mask,
+          (*(big_ptr + 2)) & high_bits_mask,
+          (*(big_ptr + 3)) & high_bits_mask
+        };
+        if (results[0] == 0) {
           ptr += 8;
-          // Try another block.
-          result = (*(big_ptr + 1)) & high_bits_mask;
-          if (result == 0) {
+          if (results[1] == 0) {
             ptr += 8;
+            if (results[2] == 0) {
+              ptr += 8;
+              if (results[3] == 0) {
+                ptr += 8;
+              }
+              else {
+                ptr += (__builtin_ctzl(results[3]) / 8);
+              }
+            }
+            else {
+              ptr += (__builtin_ctzl(results[2]) / 8);
+            }
           }
           else {
-            ptr += (__builtin_ctzl(result) / 8);
+            ptr += (__builtin_ctzl(results[1]) / 8);
           }
         }
         else {
-          ptr += (__builtin_ctzl(result) / 8);
+          ptr += (__builtin_ctzl(results[0]) / 8);
         }
       }
     }
