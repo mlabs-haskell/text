@@ -16,9 +16,11 @@ int is_valid_utf8 (uint8_t const * const src,
     // Check if the byte is ASCII.
     if (byte <= 0x7F) {
       ptr++;
-      // If we saw one ASCII byte, it's likely we'll see more.
+      // If we saw one ASCII byte, as long as it's not whitespace, it's quite
+      // likely we'll see more.
+      bool is_not_whitespace = byte > 32;
       // If possible, do a block-check ahead.
-      if (ptr + 16 < end) {
+      if ((ptr + 16 < end) && is_not_whitespace) {
         uint64_t const * big_ptr = (uint64_t const *)ptr;
         // Non-ASCII bytes have a set MSB. Thus, if we AND with 0x80 in every
         // 'lane', we will get 0 if everything is ASCII, and something else
