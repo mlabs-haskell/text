@@ -19,7 +19,7 @@ static inline int is_valid_utf8_fallback (uint8_t const * const src,
       // likely we'll see more.
       bool is_not_whitespace = byte > 32;
       // If possible, do a block-check ahead.
-      if ((ptr + 32 < end) && is_not_whitespace) {
+      if ((ptr + 64 < end) && is_not_whitespace) {
         __m128i const * big_ptr = (__m128i const *)ptr;
         // Non-ASCII bytes have a set MSB. Thus, if we AND with 0x80 in every
         // lane, we will get 0x00 in the corresponding lane if it's an ASCII
@@ -35,6 +35,24 @@ static inline int is_valid_utf8_fallback (uint8_t const * const src,
               _mm_and_si128(high_bits_mask, _mm_loadu_si128(big_ptr + 1)));
           if (result == 0) {
             ptr += 16;
+            // And one more.
+            result = _mm_movemask_epi8(
+                _mm_and_si128(high_bits_mask, _mm_loadu_si128(big_ptr + 2)));
+            if (result == 0) {
+              ptr += 16;
+              // Last one.
+              result = _mm_movemask_epi8(
+                  _mm_and_si128(high_bits_mask, _mm_loadu_si128(big_ptr + 3)));
+              if (result == 0) {
+                ptr += 16;
+              }
+              else {
+                ptr += __builtin_ctz(result);
+              }
+            }
+            else {
+              ptr += __builtin_ctz(result);
+            }
           }
           else {
             ptr += __builtin_ctz(result);
