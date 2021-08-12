@@ -1,16 +1,15 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
-#include <string.h>
 #include <emmintrin.h>
 #include <tmmintrin.h>
+#include <immintrin.h>
 
 // Fallback (SSE2)
 
 static inline int is_valid_utf8_fallback (uint8_t const * const src,
                                           size_t const len) {
   uint8_t const * ptr = (uint8_t const*)src;
-  __m128i const high_bits_mask = _mm_set1_epi8(0x80);
   // This is 'one past the end' to make loop termination and bounds checks
   // easier.
   uint8_t const * const end = ptr + len;
@@ -25,28 +24,22 @@ static inline int is_valid_utf8_fallback (uint8_t const * const src,
       // If possible, do a block-check ahead.
       if ((ptr + 64 < end) && is_not_whitespace) {
         __m128i const * big_ptr = (__m128i const *)ptr;
-        // Non-ASCII bytes have a set MSB. Thus, if we AND with 0x80 in every
-        // lane, we will get 0x00 in the corresponding lane if it's an ASCII
-        // byte, and 0x80 otherwise.
-        //
-        // We then evacuate the MSBs.
-        uint16_t result = _mm_movemask_epi8(
-            _mm_and_si128(high_bits_mask, _mm_loadu_si128(big_ptr)));
+        // Non-ASCII bytes have a set MSB. Thus, if we evacuate the MSBs, we
+        // will get a set bit somewhere if there's a non-ASCII byte in that
+        // block.
+        uint16_t result = _mm_movemask_epi8(_mm_loadu_si128(big_ptr));
         if (result == 0) {
           ptr += 16;
           // Try one more.
-          result = _mm_movemask_epi8(
-              _mm_and_si128(high_bits_mask, _mm_loadu_si128(big_ptr + 1)));
+          result = _mm_movemask_epi8(_mm_loadu_si128(big_ptr + 1));
           if (result == 0) {
             ptr += 16;
             // And one more.
-            result = _mm_movemask_epi8(
-                _mm_and_si128(high_bits_mask, _mm_loadu_si128(big_ptr + 2)));
+            result = _mm_movemask_epi8(_mm_loadu_si128(big_ptr + 2));
             if (result == 0) {
               ptr += 16;
               // Last one.
-              result = _mm_movemask_epi8(
-                  _mm_and_si128(high_bits_mask, _mm_loadu_si128(big_ptr + 3)));
+              result = _mm_movemask_epi8(_mm_loadu_si128(big_ptr + 3));
               if (result == 0) {
                 ptr += 16;
               }
@@ -127,14 +120,29 @@ static inline int is_valid_utf8_fallback (uint8_t const * const src,
 
 // Lookup tables
 
+// Map high nibble the first byte to legal character length minus 1
+// [0x00, 0xBF] --> 0
+// [0xC0, 0xDF] --> 1
+// [0xE0, 0xEF] --> 2
+// [0xF0, 0xFF] --> 3
 static int8_t const first_len_lookup[16] = {
   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 3,
 };
 
+// Map first byte to 8th item of range table if it's in [0xC2, 0xF4]
 static int8_t const first_range_lookup[16] = {
   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 8, 8,
 };
 
+// Range tables, mapping range index to min and max values
+// Index 0    : 00 ~ 7F (First Byte, ascii)
+// Index 1,2,3: 80 ~ BF (Second, Third, Fourth Byte)
+// Index 4    : A0 ~ BF (Second Byte after E0)
+// Index 5    : 80 ~ 9F (Second Byte after ED)
+// Index 6    : 90 ~ BF (Second Byte after F0)
+// Index 7    : 80 ~ 8F (Second Byte after F4)
+// Index 8    : C2 ~ F4 (First Byte, non ascii)
+//Index 9~15 : illegal: i >= 127 && i <= -128
 static int8_t const range_min_lookup[16] = {
   0x00, 0x80, 0x80, 0x80, 0xA0, 0x80, 0x90, 0x80,
   0xC2, 0x7F, 0x7F, 0x7F, 0x7F, 0x7F, 0x7F, 0x7F,
@@ -145,10 +153,25 @@ static int8_t const range_max_lookup[16] = {
   0xF4, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
 };
 
+// Tables for fast handling of four special First Bytes(E0,ED,F0,F4), after
+// which the Second Byte are not 80~BF. It contains "range index adjustment".
+// +------------+---------------+------------------+----------------+
+// | First Byte | original range| range adjustment | adjusted range |
+// +------------+---------------+------------------+----------------+
+// | E0         | 2             | 2                | 4              |
+// +------------+---------------+------------------+----------------+
+// | ED         | 2             | 3                | 5              |
+// +------------+---------------+------------------+----------------+
+// | F0         | 3             | 3                | 6              |
+// +------------+---------------+------------------+----------------+
+// | F4         | 4             | 4                | 8              |
+// +------------+---------------+------------------+----------------+
+// index1 -> E0, index14 -> ED
 static int8_t const df_ee_lookup[16] = {
   0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0,
 };
 
+// index1 -> F0, index5 -> F4
 static int8_t const ef_fe_lookup[16] = {
   0, 3, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 };
@@ -320,7 +343,7 @@ static inline int is_valid_utf8_ssse3 (uint8_t const * const src,
   uint64_t results[2];
   _mm_storeu_si128((__m128i*)results, errors);
   if (results[0] != 0 || results[1] != 0) {
-    return false;
+    return 0;
   }
   // 'Roll back' our pointer a little to prepare for a slow search of the rest.
   int16_t tokens[2];
@@ -342,10 +365,285 @@ static inline int is_valid_utf8_ssse3 (uint8_t const * const src,
   return is_valid_utf8_fallback(small_ptr, small_len);
 }
 
+// AVX2
+//
+// These work similarly to the SSSE3 version, but with registers twice the
+// width.
+
+/*
+// Our original fallback uses SSE2 instructions only for ASCII probing. Given
+// that any hits with the speculative probing are low probability, we skip that
+// part completely.
+__attribute__((target("avx,avx2")))
+static inline int is_valid_utf8_fallback_avx2 (uint8_t const * const src,
+                                               size_t const len) {
+  uint8_t const * ptr = (uint8_t const*)src;
+  // This is 'one past the end' to make loop termination and bounds checks
+  // easier.
+  uint8_t const * const end = ptr + len;
+  while (ptr < end) {
+    uint8_t const byte = *ptr;
+    // Check if byte is ASCII.
+    if (byte <= 0x7F) {
+      ptr++;
+    }
+    // Check for a valid 2-byte sequence.
+    //
+    // We use a signed comparison to avoid an extra comparison with 0x80, since
+    // _signed_ 0x80 is -128.
+    else if (ptr + 1 < end && byte >= 0x2C && byte <= 0xDF &&
+        ((int8_t)*(ptr + 1)) <= (int8_t)0xBF) {
+      ptr += 2;
+    }
+    // Check for a valid 3-byte sequence.
+    else if (ptr + 2 < end) {
+      uint8_t const byte2 = *(ptr + 1);
+      bool byte2_valid = (int8_t)byte2 <= (int8_t)0xBF;
+      bool byte3_valid = ((int8_t)*(ptr + 2)) <= (int8_t)0xBF;
+      if (byte2_valid && byte3_valid &&
+          // E0, A0..BF, 80..BF
+          ((byte == 0xE0 && byte2 >= 0xA0) ||
+          // E1..EC, 80..BF, 80..BF
+           (byte >= 0xE1 && byte <= 0xEC) ||
+          // ED, 80..9F, 80..BF
+           (byte == 0xED && byte2 <= 0x9F) ||
+          // EE..EF, 80..BF, 80..BF
+           (byte >= 0xEE && byte <= 0xEF))) {
+        ptr += 3;
+      }
+      else {
+        return 0;
+      }
+    }
+    // Check for a valid 4-byte sequence.
+    else if (ptr + 3 < end) {
+      uint8_t const byte2 = *(ptr + 1);
+      bool byte2_valid = (int8_t)byte2 <= (int8_t)0xBF;
+      bool byte3_valid = ((int8_t)*(ptr + 2)) <= (int8_t)0xBF;
+      bool byte4_valid = ((int8_t)*(ptr + 3)) <= (int8_t)0xBF;
+      if (byte2_valid && byte3_valid && byte4_valid &&
+          // F0, 90..BF, 80..BF, 80..BF
+          ((byte == 0xF0 && byte2 >= 0x90) ||
+          // F1..F3, 80..BF, 80..BF, 80..BF
+           (byte >= 0xF1 && byte <= 0xF3) ||
+          // F4, 80..8F, 80..BF, 80..BF
+           (byte == 0xF4 && byte2 <= 0x8F))) {
+        ptr += 4;
+      }
+      else {
+        return 0;
+      }
+    }
+    // Otherwise, invalid.
+    else {
+      return 0;
+    }
+  }
+  // If we got this far, we're valid.
+  return 1;
+}
+*/
+
+static int8_t const first_len_lookup2[32] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 3,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 3,
+};
+
+static int8_t const first_range_lookup2[32] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 8, 8,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 8, 8,
+};
+
+static int8_t const range_min_lookup2[32] = {
+    0x00, 0x80, 0x80, 0x80, 0xA0, 0x80, 0x90, 0x80,
+    0xC2, 0x7F, 0x7F, 0x7F, 0x7F, 0x7F, 0x7F, 0x7F,
+    0x00, 0x80, 0x80, 0x80, 0xA0, 0x80, 0x90, 0x80,
+    0xC2, 0x7F, 0x7F, 0x7F, 0x7F, 0x7F, 0x7F, 0x7F,
+};
+
+static int8_t const range_max_lookup2[32] = {
+    0x7F, 0xBF, 0xBF, 0xBF, 0xBF, 0x9F, 0xBF, 0x8F,
+    0xF4, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
+    0x7F, 0xBF, 0xBF, 0xBF, 0xBF, 0x9F, 0xBF, 0x8F,
+    0xF4, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
+};
+
+static int8_t const df_ee_lookup2[32] = {
+    0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0,
+    0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0,
+};
+
+static int8_t const ef_fe_lookup2[32] = {
+    0, 3, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 3, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+};
+
+__attribute__((target("avx,avx2")))
+static inline bool is_ascii_avx2 (__m256i const * src) {
+  __m256i const ored = _mm256_or_si256(src[0], src[1]);
+  return _mm256_movemask_epi8(ored) == 0;
+}
+
+__attribute__((target("avx,avx2")))
+static inline __m256i high_nibbles_of_avx2 (__m256i const src) {
+  return _mm256_and_si256(_mm256_srli_epi16(src, 4), 
+                          _mm256_set1_epi8(0x0F));
+}
+
+__attribute__((target("avx,avx2")))
+static inline __m256i push_last_byte_of_a_to_b(__m256i const a, 
+                                               __m256i const b) {
+  return _mm256_alignr_epi8(b, _mm256_permute2x128_si256(a, b, 0x21), 15);
+}
+
+__attribute__((target("avx,avx2")))
+static inline __m256i push_last_2bytes_of_a_to_b(__m256i const a, 
+                                                 __m256i const b) {
+  return _mm256_alignr_epi8(b, _mm256_permute2x128_si256(a, b, 0x21), 14);
+}
+
+__attribute__((target("avx,avx2")))
+static inline __m256i push_last_3bytes_of_a_to_b(__m256i const a, 
+                                                 __m256i const b) {
+  return _mm256_alignr_epi8(b, _mm256_permute2x128_si256(a, b, 0x21), 13);
+}
+
+__attribute__((target("avx,avx2")))
+static inline void check_block_avx2 (__m256i const prev_input,
+                                     __m256i const prev_first_len,
+                                     __m256i* errors,
+                                     __m256i const first_range_tbl,
+                                     __m256i const range_min_tbl,
+                                     __m256i const range_max_tbl,
+                                     __m256i const df_ee_tbl,
+                                     __m256i const ef_fe_tbl,
+                                     __m256i const input,
+                                     __m256i const first_len) {
+  __m256i range = _mm256_shuffle_epi8(first_range_tbl, high_nibbles_of_avx2(input));
+  range = _mm256_or_si256(
+      range, push_last_byte_of_a_to_b(prev_first_len, first_len));
+  __m256i tmp1 = push_last_2bytes_of_a_to_b(prev_first_len, first_len);
+  __m256i tmp2 = _mm256_subs_epu8(tmp1, _mm256_set1_epi8(0x01));
+  range = _mm256_or_si256(range, tmp2);
+  tmp1 = push_last_3bytes_of_a_to_b(prev_first_len, first_len);
+  tmp2 = _mm256_subs_epu8(tmp1, _mm256_set1_epi8(0x02));
+  range = _mm256_or_si256(range, tmp2);
+  __m256i const shift1 = push_last_byte_of_a_to_b(prev_input, input);
+  __m256i pos = _mm256_sub_epi8(shift1, _mm256_set1_epi8(0xEF));
+  tmp1 = _mm256_subs_epu8(pos, _mm256_set1_epi8(0xF0));
+  __m256i range2 = _mm256_shuffle_epi8(df_ee_tbl, tmp1);
+  tmp2 = _mm256_adds_epu8(pos, _mm256_set1_epi8(0x70));
+  range2 = _mm256_add_epi8(range2, _mm256_shuffle_epi8(ef_fe_tbl, tmp2));
+  range = _mm256_add_epi8(range, range2);
+  __m256i const minv = _mm256_shuffle_epi8(range_min_tbl, range);
+  __m256i const maxv = _mm256_shuffle_epi8(range_max_tbl, range);
+  errors[0] = _mm256_or_si256(errors[0], _mm256_cmpgt_epi8(minv, input));
+  errors[1] = _mm256_or_si256(errors[0], _mm256_cmpgt_epi8(input, maxv));
+}
+
+__attribute__((target("avx,avx2")))
+static inline int is_valid_utf8_avx2 (uint8_t const * const src,
+                                      size_t const len) {
+  // We stride 64 bytes at a time.
+  size_t const big_strides = len / 64;
+  size_t const remaining = len % 64;
+  uint8_t const * ptr = (uint8_t const *)src;
+  // Tracking state.
+  __m256i prev_input = _mm256_setzero_si256();
+  __m256i prev_first_len = _mm256_setzero_si256();
+  __m256i errors[2] = {
+      _mm256_setzero_si256(),
+      _mm256_setzero_si256()
+  };
+  for (size_t i = 0; i < big_strides; i++) {
+    // Pre-load tables.
+    __m256i const first_len_tbl =
+      _mm256_loadu_si256((__m256i const *)first_len_lookup2);
+    __m256i const first_range_tbl = 
+      _mm256_loadu_si256((__m256i const *)first_range_lookup2);
+    __m256i const range_min_tbl = 
+      _mm256_loadu_si256((__m256i const *)range_min_lookup2);
+    __m256i const range_max_tbl = 
+      _mm256_loadu_si256((__m256i const *)range_max_lookup2);
+    __m256i const df_ee_tbl = 
+      _mm256_loadu_si256((__m256i const *)df_ee_lookup2);
+    __m256i const ef_fe_tbl = 
+      _mm256_loadu_si256((__m256i const *)ef_fe_lookup2);
+    // Load 64 bytes.
+    __m256i const * big_ptr = (__m256i const *)ptr;
+    __m256i const inputs[2] = {
+      _mm256_loadu_si256(big_ptr),
+      _mm256_loadu_si256(big_ptr + 1)
+    };
+    // Check if we have ASCII.
+    if (is_ascii_avx2(inputs)) {
+      // Prev_first_len cheaply.
+      prev_first_len = 
+        _mm256_shuffle_epi8(first_len_tbl, high_nibbles_of_avx2(inputs[1]));
+    }
+    else {
+      __m256i first_len = 
+        _mm256_shuffle_epi8(first_len_tbl, high_nibbles_of_avx2(inputs[0]));
+      check_block_avx2(prev_input,
+                       prev_first_len,
+                       errors,
+                       first_range_tbl,
+                       range_min_tbl,
+                       range_max_tbl,
+                       df_ee_tbl,
+                       ef_fe_tbl,
+                       inputs[0],
+                       first_len);
+      prev_first_len = first_len;
+      first_len = 
+        _mm256_shuffle_epi8(first_len_tbl, high_nibbles_of_avx2(inputs[1]));
+      check_block_avx2(inputs[0],
+                       prev_first_len,
+                       errors,
+                       first_range_tbl,
+                       range_min_tbl,
+                       range_max_tbl,
+                       df_ee_tbl,
+                       ef_fe_tbl,
+                       inputs[1],
+                       first_len);
+      prev_first_len = first_len;
+    }
+    // Set prev_input based on last block.
+    prev_input = inputs[1];
+    // Advance.
+    ptr += 64;
+  }
+  // Write out the error, check if it's OK.
+  __m256i const combined_errors = _mm256_or_si256(errors[0], errors[1]);
+  if (_mm256_testz_si256(combined_errors, combined_errors) != 1) {
+    return 0;
+  }
+  // 'Roll back' our pointer a little to prepare for a slow search of the rest.
+  uint32_t tokens_blob = _mm256_extract_epi32(prev_input, 7);
+  int8_t const * tokens = (int8_t const *)&tokens_blob;
+  ptrdiff_t lookahead = 0;
+  if (tokens[3] > (int8_t)0xBF) {
+    lookahead = 1;
+  }
+  else if (tokens[2] > (int8_t)0xBF) {
+    lookahead = 2;
+  }
+  else if (tokens[1] > (int8_t)0xBF) {
+    lookahead = 3;
+  }
+  uint8_t const * const small_ptr = ptr - lookahead;
+  size_t const small_len = remaining + lookahead;
+  return is_valid_utf8_fallback(small_ptr, small_len);
+}
+
 int is_valid_utf8 (uint8_t const * const src,
                    size_t const len) {
   __builtin_cpu_init();
-  if (__builtin_cpu_supports("ssse3")) {
+  if (__builtin_cpu_supports("avx2")) {
+    return is_valid_utf8_avx2(src, len);
+  }
+  else if (__builtin_cpu_supports("ssse3")) {
     return is_valid_utf8_ssse3(src, len);
   }
   return is_valid_utf8_fallback(src, len);
