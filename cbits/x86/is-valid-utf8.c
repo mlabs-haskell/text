@@ -162,43 +162,44 @@ static inline bool is_ascii_sse2 (__m128i const * src) {
 }
 
 __attribute__((target("ssse3")))
-static inline __m128i check_block_sse3 (__m128i* prev_input_ptr,
-                                        __m128i* prev_first_len_ptr,
+static inline __m128i high_nibbles_of (__m128i const src) {
+  return _mm_and_si128(_mm_srli_epi16(src, 4), _mm_set1_epi8(0x0F));
+}
+
+__attribute__((target("ssse3")))
+static inline __m128i check_block_sse3 (__m128i prev_input,
+                                        __m128i prev_first_len,
                                         __m128i const errors,
-                                        __m128i const first_len_tbl,
                                         __m128i const first_range_tbl,
                                         __m128i const range_min_tbl,
                                         __m128i const range_max_tbl,
                                         __m128i const df_ee_tbl,
                                         __m128i const ef_fe_tbl,
-                                        __m128i const input) {
+                                        __m128i const input,
+                                        __m128i const first_len) {
   // Get the high 4-bits of the input.
   __m128i const high_nibbles = 
     _mm_and_si128(_mm_srli_epi16(input, 4), _mm_set1_epi8(0x0F));
-  // Compute first lengths.
-  // This is 0 for [00, 7F], 1 for [C0, DF], 2 for [E0, EF], 3 for [F0, FF].
-  // We do this by table lookup.
-  __m128i const first_len = _mm_shuffle_epi8(first_len_tbl, high_nibbles);
   // Set range index to 8 for bytes in [C0, FF] by lookup (first byte).
   __m128i range = _mm_shuffle_epi8(first_range_tbl, high_nibbles);
   // Reduce the range index based on first_len (second byte)
   // This is 0 for [00, 7F], 1 for [C0, DF], 2 for [E0, EF], 3 for [F0, FF].
   range = _mm_or_si128(
-      range, _mm_alignr_epi8(first_len, (*prev_first_len_ptr), 15));
+      range, _mm_alignr_epi8(first_len, prev_first_len, 15));
   // Set range index to the saturation of (first_len - 1) (third byte).
   // This is 0 for [00, 7F], 0 for [C0, DF], 1 for [E0, EF], 2 for [F0, FF].
-  __m128i tmp = _mm_alignr_epi8(first_len, (*prev_first_len_ptr), 14);
+  __m128i tmp = _mm_alignr_epi8(first_len, prev_first_len, 14);
   tmp = _mm_subs_epu8(tmp, _mm_set1_epi8(1));
   range = _mm_or_si128(range, tmp);
   // Set range index to the saturation of (first_len - 2) (fourth byte).
   // This is 0 for [00, 7F], 0 for [C0, DF], 0 for [E0, EF] and 1 for [F0, FF].
-  tmp = _mm_alignr_epi8(first_len, (*prev_first_len_ptr), 13);
+  tmp = _mm_alignr_epi8(first_len, prev_first_len, 13);
   tmp = _mm_subs_epu8(tmp, _mm_set1_epi8(2));
   range = _mm_or_si128(range, tmp);
   // At this stage, we have calculated range indices correctly, except for
   // special cases for first bytes (E0, ED, F0, F4). We repair this to avoid
   // missing in the range table.
-  __m128i const shift1 = _mm_alignr_epi8(input, (*prev_input_ptr), 15);
+  __m128i const shift1 = _mm_alignr_epi8(input, prev_input, 15);
   __m128i const pos = _mm_sub_epi8(shift1, _mm_set1_epi8(0xEF));
   tmp = _mm_subs_epu8(pos, _mm_set1_epi8(0xF0));
   __m128i range2 = _mm_shuffle_epi8(df_ee_tbl, tmp);
@@ -213,9 +214,6 @@ static inline __m128i check_block_sse3 (__m128i* prev_input_ptr,
   tmp = _mm_or_si128(
       _mm_cmplt_epi8(input, minv),
       _mm_cmpgt_epi8(input, maxv));
-  // Ensure our state is carried forward.
-  *prev_input_ptr = input;
-  *prev_first_len_ptr = first_len;
   // Accumulate error.
   return _mm_or_si128(errors, tmp);
 }
@@ -231,20 +229,20 @@ static inline int is_valid_utf8_ssse3 (uint8_t const * const src,
   __m128i prev_input = _mm_setzero_si128();
   __m128i prev_first_len = _mm_setzero_si128();
   __m128i errors = _mm_setzero_si128();
-  // Pre-load tables.
-  __m128i const first_len_tbl = 
-    _mm_loadu_si128((__m128i const *)first_len_lookup);
-  __m128i const first_range_tbl = 
-    _mm_loadu_si128((__m128i const *)first_range_lookup);
-  __m128i const range_min_tbl = 
-    _mm_loadu_si128((__m128i const *)range_min_lookup);
-  __m128i const range_max_tbl = 
-    _mm_loadu_si128((__m128i const *)range_max_lookup);
-  __m128i const df_ee_tbl = 
-    _mm_loadu_si128((__m128i const *)df_ee_lookup);
-  __m128i const ef_fe_tbl = 
-    _mm_loadu_si128((__m128i const *)ef_fe_lookup);
   for (size_t i = 0; i < big_strides; i++) {
+    // Pre-load tables.
+    __m128i const first_len_tbl = 
+      _mm_loadu_si128((__m128i const *)first_len_lookup);
+    __m128i const first_range_tbl = 
+      _mm_loadu_si128((__m128i const *)first_range_lookup);
+    __m128i const range_min_tbl = 
+      _mm_loadu_si128((__m128i const *)range_min_lookup);
+    __m128i const range_max_tbl = 
+      _mm_loadu_si128((__m128i const *)range_max_lookup);
+    __m128i const df_ee_tbl = 
+      _mm_loadu_si128((__m128i const *)df_ee_lookup);
+    __m128i const ef_fe_tbl = 
+      _mm_loadu_si128((__m128i const *)ef_fe_lookup);
     // Load 64 bytes.
     __m128i const * big_ptr = (__m128i const *)ptr;
     __m128i const inputs[4] = {
@@ -254,30 +252,67 @@ static inline int is_valid_utf8_ssse3 (uint8_t const * const src,
       _mm_loadu_si128(big_ptr + 3)
     };
     // Check if we have ASCII. 
-    if (__builtin_expect(!!(is_ascii_sse2(inputs)), 1)) {
-      // Set prev_input and prev_first_len based on last block. Errors can stay
-      // as-are.
-      prev_input = inputs[3];
-      __m128i const high_nibbles =
-        _mm_and_si128(_mm_srli_epi16(inputs[3], 4), _mm_set1_epi8(0x0F));
-      prev_first_len = _mm_shuffle_epi8(first_len_tbl, high_nibbles);
+    if (is_ascii_sse2(inputs)) {
+      // Prev_first_len cheaply.
+      prev_first_len = 
+        _mm_shuffle_epi8(first_len_tbl, high_nibbles_of(inputs[3]));
     }
     else {
-      // Check four blocks, propagating everything as-needed.
-      #pragma GCC unroll 4
-      for (size_t j = 0; j < 4; j++) {
-        errors = check_block_sse3(&prev_input,
-                                  &prev_first_len,
-                                  errors,
-                                  first_len_tbl,
-                                  first_range_tbl,
-                                  range_min_tbl,
-                                  range_max_tbl,
-                                  df_ee_tbl,
-                                  ef_fe_tbl,
-                                  inputs[j]);
-      }
+      __m128i first_len = 
+        _mm_shuffle_epi8(first_len_tbl, high_nibbles_of(inputs[0]));
+      errors = check_block_sse3(prev_input,
+                                prev_first_len,
+                                errors,
+                                first_range_tbl,
+                                range_min_tbl,
+                                range_max_tbl,
+                                df_ee_tbl,
+                                ef_fe_tbl,
+                                inputs[0],
+                                first_len);
+      prev_first_len = first_len;
+      first_len = 
+        _mm_shuffle_epi8(first_len_tbl, high_nibbles_of(inputs[1]));
+      errors = check_block_sse3(inputs[0],
+                                prev_first_len,
+                                errors,
+                                first_range_tbl,
+                                range_min_tbl,
+                                range_max_tbl,
+                                df_ee_tbl,
+                                ef_fe_tbl,
+                                inputs[1],
+                                first_len);
+      prev_first_len = first_len;
+      first_len = 
+        _mm_shuffle_epi8(first_len_tbl, high_nibbles_of(inputs[2]));
+      errors = check_block_sse3(inputs[1],
+                                prev_first_len,
+                                errors,
+                                first_range_tbl,
+                                range_min_tbl,
+                                range_max_tbl,
+                                df_ee_tbl,
+                                ef_fe_tbl,
+                                inputs[2],
+                                first_len);
+      prev_first_len = first_len;
+      first_len = 
+        _mm_shuffle_epi8(first_len_tbl, high_nibbles_of(inputs[3]));
+      errors = check_block_sse3(inputs[2],
+                                prev_first_len,
+                                errors,
+                                first_range_tbl,
+                                range_min_tbl,
+                                range_max_tbl,
+                                df_ee_tbl,
+                                ef_fe_tbl,
+                                inputs[3],
+                                first_len);
+      prev_first_len = first_len;
     }
+    // Set prev_input based on last block.
+    prev_input = inputs[3];
     // Advance.
     ptr += 64;
   }
