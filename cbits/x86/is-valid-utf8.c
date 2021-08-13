@@ -5,10 +5,81 @@
 #include <tmmintrin.h>
 #include <immintrin.h>
 
-// Fallback (SSE2)
+// Fallback (for tails)
 
 static inline int is_valid_utf8_fallback (uint8_t const * const src,
-                                          size_t const len) {
+                                      size_t const len) {
+  uint8_t const * ptr = (uint8_t const*)src;
+  // This is 'one past the end' to make loop termination and bounds checks
+  // easier.
+  uint8_t const * const end = ptr + len;
+  while (ptr < end) {
+    uint8_t const byte = *ptr;
+    // Check if the byte is ASCII.
+    if (byte <= 0x7F) {
+      ptr++;
+    }
+    // Check for a valid 2-byte sequence.
+    //
+    // We use a signed comparison to avoid an extra comparison with 0x80, since
+    // _signed_ 0x80 is -128.
+    else if (ptr + 1 < end && byte >= 0xC2 && byte <= 0xDF &&
+        ((int8_t)*(ptr + 1)) <= (int8_t)0xBF) {
+      ptr += 2;
+    }
+    // Check for a valid 3-byte sequence.
+    else if (ptr + 2 < end) {
+      uint8_t const byte2 = *(ptr + 1);
+      bool byte2_valid = (int8_t)byte2 <= (int8_t)0xBF;
+      bool byte3_valid = ((int8_t)*(ptr + 2)) <= (int8_t)0xBF;
+      if (byte2_valid && byte3_valid &&
+          // E0, A0..BF, 80..BF
+          ((byte == 0xE0 && byte2 >= 0xA0) ||
+          // E1..EC, 80..BF, 80..BF
+           (byte >= 0xE1 && byte <= 0xEC) ||
+          // ED, 80..9F, 80..BF
+           (byte == 0xED && byte2 <= 0x9F) ||
+          // EE..EF, 80..BF, 80..BF
+           (byte >= 0xEE && byte <= 0xEF))) {
+        ptr += 3;
+      }
+      else {
+        return 0;
+      }
+    }
+    // Check for a valid 4-byte sequence.
+    else if (ptr + 3 < end) {
+      uint8_t const byte2 = *(ptr + 1);
+      bool byte2_valid = (int8_t)byte2 <= (int8_t)0xBF;
+      bool byte3_valid = ((int8_t)*(ptr + 2)) <= (int8_t)0xBF;
+      bool byte4_valid = ((int8_t)*(ptr + 3)) <= (int8_t)0xBF;
+      if (byte2_valid && byte3_valid && byte4_valid &&
+          // F0, 90..BF, 80..BF, 80..BF
+          ((byte == 0xF0 && byte2 >= 0x90) ||
+          // F1..F3, 80..BF, 80..BF, 80..BF
+           (byte >= 0xF1 && byte <= 0xF3) ||
+          // F4, 80..8F, 80..BF, 80..BF
+           (byte == 0xF4 && byte2 <= 0x8F))) {
+        ptr += 4;
+      }
+      else {
+        return 0;
+      }
+    }
+    // Otherwise, invalid.
+    else {
+      return 0;
+    }
+  }
+  // If we got this far, we're valid.
+  return 1;
+}
+
+
+// SSE2
+
+static inline int is_valid_utf8_sse2 (uint8_t const * const src,
+                                      size_t const len) {
   uint8_t const * ptr = (uint8_t const*)src;
   // This is 'one past the end' to make loop termination and bounds checks
   // easier.
@@ -370,80 +441,6 @@ static inline int is_valid_utf8_ssse3 (uint8_t const * const src,
 // These work similarly to the SSSE3 version, but with registers twice the
 // width.
 
-/*
-// Our original fallback uses SSE2 instructions only for ASCII probing. Given
-// that any hits with the speculative probing are low probability, we skip that
-// part completely.
-__attribute__((target("avx,avx2")))
-static inline int is_valid_utf8_fallback_avx2 (uint8_t const * const src,
-                                               size_t const len) {
-  uint8_t const * ptr = (uint8_t const*)src;
-  // This is 'one past the end' to make loop termination and bounds checks
-  // easier.
-  uint8_t const * const end = ptr + len;
-  while (ptr < end) {
-    uint8_t const byte = *ptr;
-    // Check if byte is ASCII.
-    if (byte <= 0x7F) {
-      ptr++;
-    }
-    // Check for a valid 2-byte sequence.
-    //
-    // We use a signed comparison to avoid an extra comparison with 0x80, since
-    // _signed_ 0x80 is -128.
-    else if (ptr + 1 < end && byte >= 0x2C && byte <= 0xDF &&
-        ((int8_t)*(ptr + 1)) <= (int8_t)0xBF) {
-      ptr += 2;
-    }
-    // Check for a valid 3-byte sequence.
-    else if (ptr + 2 < end) {
-      uint8_t const byte2 = *(ptr + 1);
-      bool byte2_valid = (int8_t)byte2 <= (int8_t)0xBF;
-      bool byte3_valid = ((int8_t)*(ptr + 2)) <= (int8_t)0xBF;
-      if (byte2_valid && byte3_valid &&
-          // E0, A0..BF, 80..BF
-          ((byte == 0xE0 && byte2 >= 0xA0) ||
-          // E1..EC, 80..BF, 80..BF
-           (byte >= 0xE1 && byte <= 0xEC) ||
-          // ED, 80..9F, 80..BF
-           (byte == 0xED && byte2 <= 0x9F) ||
-          // EE..EF, 80..BF, 80..BF
-           (byte >= 0xEE && byte <= 0xEF))) {
-        ptr += 3;
-      }
-      else {
-        return 0;
-      }
-    }
-    // Check for a valid 4-byte sequence.
-    else if (ptr + 3 < end) {
-      uint8_t const byte2 = *(ptr + 1);
-      bool byte2_valid = (int8_t)byte2 <= (int8_t)0xBF;
-      bool byte3_valid = ((int8_t)*(ptr + 2)) <= (int8_t)0xBF;
-      bool byte4_valid = ((int8_t)*(ptr + 3)) <= (int8_t)0xBF;
-      if (byte2_valid && byte3_valid && byte4_valid &&
-          // F0, 90..BF, 80..BF, 80..BF
-          ((byte == 0xF0 && byte2 >= 0x90) ||
-          // F1..F3, 80..BF, 80..BF, 80..BF
-           (byte >= 0xF1 && byte <= 0xF3) ||
-          // F4, 80..8F, 80..BF, 80..BF
-           (byte == 0xF4 && byte2 <= 0x8F))) {
-        ptr += 4;
-      }
-      else {
-        return 0;
-      }
-    }
-    // Otherwise, invalid.
-    else {
-      return 0;
-    }
-  }
-  // If we got this far, we're valid.
-  return 1;
-}
-*/
-
 static int8_t const first_len_lookup2[32] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 3,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 3,
@@ -480,7 +477,8 @@ static int8_t const ef_fe_lookup2[32] = {
 
 __attribute__((target("avx,avx2")))
 static inline bool is_ascii_avx2 (__m256i const * src) {
-  __m256i const ored = _mm256_or_si256(src[0], src[1]);
+  __m256i const ored = _mm256_or_si256(_mm256_or_si256(src[0], src[1]),
+                                       _mm256_or_si256(src[2], src[3]));
   return _mm256_movemask_epi8(ored) == 0;
 }
 
@@ -544,9 +542,9 @@ static inline void check_block_avx2 (__m256i const prev_input,
 __attribute__((target("avx,avx2")))
 static inline int is_valid_utf8_avx2 (uint8_t const * const src,
                                       size_t const len) {
-  // We stride 64 bytes at a time.
-  size_t const big_strides = len / 64;
-  size_t const remaining = len % 64;
+  // We stride 128 bytes at a time.
+  size_t const big_strides = len / 128;
+  size_t const remaining = len % 128;
   uint8_t const * ptr = (uint8_t const *)src;
   // Tracking state.
   __m256i prev_input = _mm256_setzero_si256();
@@ -569,17 +567,19 @@ static inline int is_valid_utf8_avx2 (uint8_t const * const src,
       _mm256_loadu_si256((__m256i const *)df_ee_lookup2);
     __m256i const ef_fe_tbl = 
       _mm256_loadu_si256((__m256i const *)ef_fe_lookup2);
-    // Load 64 bytes.
+    // Load 128 bytes.
     __m256i const * big_ptr = (__m256i const *)ptr;
-    __m256i const inputs[2] = {
+    __m256i const inputs[4] = {
       _mm256_loadu_si256(big_ptr),
-      _mm256_loadu_si256(big_ptr + 1)
+      _mm256_loadu_si256(big_ptr + 1),
+      _mm256_loadu_si256(big_ptr + 2),
+      _mm256_loadu_si256(big_ptr + 3)
     };
     // Check if we have ASCII.
     if (is_ascii_avx2(inputs)) {
       // Prev_first_len cheaply.
       prev_first_len = 
-        _mm256_shuffle_epi8(first_len_tbl, high_nibbles_of_avx2(inputs[1]));
+        _mm256_shuffle_epi8(first_len_tbl, high_nibbles_of_avx2(inputs[3]));
     }
     else {
       __m256i first_len = 
@@ -608,11 +608,37 @@ static inline int is_valid_utf8_avx2 (uint8_t const * const src,
                        inputs[1],
                        first_len);
       prev_first_len = first_len;
+      first_len = 
+        _mm256_shuffle_epi8(first_len_tbl, high_nibbles_of_avx2(inputs[2]));
+      check_block_avx2(inputs[1],
+                       prev_first_len,
+                       errors,
+                       first_range_tbl,
+                       range_min_tbl,
+                       range_max_tbl,
+                       df_ee_tbl,
+                       ef_fe_tbl,
+                       inputs[2],
+                       first_len);
+      prev_first_len = first_len;
+      first_len = 
+        _mm256_shuffle_epi8(first_len_tbl, high_nibbles_of_avx2(inputs[3]));
+      check_block_avx2(inputs[2],
+                       prev_first_len,
+                       errors,
+                       first_range_tbl,
+                       range_min_tbl,
+                       range_max_tbl,
+                       df_ee_tbl,
+                       ef_fe_tbl,
+                       inputs[3],
+                       first_len);
+      prev_first_len = first_len;
     }
     // Set prev_input based on last block.
-    prev_input = inputs[1];
+    prev_input = inputs[3];
     // Advance.
-    ptr += 64;
+    ptr += 128;
   }
   // Write out the error, check if it's OK.
   __m256i const combined_errors = _mm256_or_si256(errors[0], errors[1]);
@@ -646,5 +672,5 @@ int is_valid_utf8 (uint8_t const * const src,
   else if (__builtin_cpu_supports("ssse3")) {
     return is_valid_utf8_ssse3(src, len);
   }
-  return is_valid_utf8_fallback(src, len);
+  return is_valid_utf8_sse2(src, len);
 }
